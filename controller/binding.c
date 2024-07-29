@@ -1908,9 +1908,17 @@ consider_l3gw_lport(const struct sbrec_port_binding *pb,
                     struct binding_ctx_in *b_ctx_in,
                     struct binding_ctx_out *b_ctx_out)
 {
-    const char *chassis_id = smap_get(&pb->options, "l3gateway-chassis");
-    bool our_chassis = chassis_id && !strcmp(chassis_id,
-                                             b_ctx_in->chassis_rec->name);
+    const char *l3gateways = smap_get(&pb->options, "l3gateway-chassis");
+    bool our_chassis = false;
+    char *cur, *next, *start;
+    next = start = xstrdup(l3gateways);
+    while ((cur = strsep(&next, ",")) && *cur) {
+        if (!strcmp(cur, b_ctx_in->chassis_rec->name)) {
+          our_chassis = true;
+          break;
+        }
+    }
+    free(start);
 
     return consider_nonvif_lport_(pb, our_chassis, false, b_ctx_in, b_ctx_out);
 }

@@ -1522,7 +1522,8 @@ consider_port_binding(struct ovsdb_idl_index *sbrec_port_binding_by_name,
     struct match match;
     if (!strcmp(binding->type, "patch")
         || (!strcmp(binding->type, "l3gateway")
-            && binding->chassis == chassis)) {
+            && (binding->chassis == chassis
+              || is_additional_chassis(binding, chassis)))) {
 
         const struct sbrec_port_binding *peer = get_binding_peer(
                 sbrec_port_binding_by_name, binding);

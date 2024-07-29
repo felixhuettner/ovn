@@ -134,24 +134,44 @@ lport_can_bind_on_this_chassis(const struct sbrec_chassis *chassis_rec,
 
     const char *requested_chassis_option = smap_get(&pb->options,
                                                     "requested-chassis");
-    if (!requested_chassis_option || !strcmp("", requested_chassis_option)) {
+    const char *l3gateway_chassis_option = smap_get(&pb->options,
+                                                    "l3gateway-chassis");
+    if (!l3gateway_chassis_option && (!requested_chassis_option 
+          || !strcmp("", requested_chassis_option))) {
         return CAN_BIND_AS_MAIN;
     }
 
-    char *tokstr = xstrdup(requested_chassis_option);
-    char *save_ptr = NULL;
-    char *chassis;
     enum can_bind can_bind = CAN_BIND_AS_MAIN;
-    for (chassis = strtok_r(tokstr, ",", &save_ptr); chassis != NULL;
-         chassis = strtok_r(NULL, ",", &save_ptr)) {
-        if (!strcmp(chassis, chassis_rec->name)
-                || !strcmp(chassis, chassis_rec->hostname)) {
-            free(tokstr);
-            return can_bind;
-        }
-        can_bind = CAN_BIND_AS_ADDITIONAL;
+    char *save_ptr = NULL;
+    char *chassis, *tokstr;
+    if (requested_chassis_option) {
+      tokstr = xstrdup(requested_chassis_option);
+      for (chassis = strtok_r(tokstr, ",", &save_ptr); chassis != NULL;
+           chassis = strtok_r(NULL, ",", &save_ptr)) {
+          if (!strcmp(chassis, chassis_rec->name)
+                  || !strcmp(chassis, chassis_rec->hostname)) {
+              free(tokstr);
+              return can_bind;
+          }
+          can_bind = CAN_BIND_AS_ADDITIONAL;
+      }
+      free(tokstr);
     }
-    free(tokstr);
+
+    if (l3gateway_chassis_option) {
+      tokstr = xstrdup(l3gateway_chassis_option);
+      for (chassis = strtok_r(tokstr, ",", &save_ptr); chassis != NULL;
+           chassis = strtok_r(NULL, ",", &save_ptr)) {
+          if (!strcmp(chassis, chassis_rec->name)
+                  || !strcmp(chassis, chassis_rec->hostname)) {
+              free(tokstr);
+              return can_bind;
+          }
+          can_bind = CAN_BIND_AS_ADDITIONAL;
+      }
+      free(tokstr);
+    }
+
     return CANNOT_BIND;
 }
 
