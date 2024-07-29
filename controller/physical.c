@@ -1083,7 +1083,8 @@ get_binding_peer(struct ovsdb_idl_index *sbrec_port_binding_by_name,
     const struct sbrec_port_binding *peer = lport_lookup_by_name(
         sbrec_port_binding_by_name, peer_name);
     if (!peer || strcmp(peer->type, binding->type)) {
-        return NULL;
+        // TODO: this should only be allowed if one is l3gateway and the other patch
+        //return NULL;
     }
     const char *peer_peer_name = smap_get(&peer->options, "peer");
     if (!peer_peer_name || strcmp(peer_peer_name, binding->logical_port)) {
@@ -1560,6 +1561,47 @@ consider_port_binding(struct ovsdb_idl_index *sbrec_port_binding_by_name,
         ofctrl_add_flow(flow_table, OFTABLE_LOG_TO_PHY, 100,
                         binding->header_.uuid.parts[0],
                         &match, ofpacts_p, &binding->header_.uuid);
+
+        // TODO: felix, this todo as no location yet. The external nexthop of the l3gateway must have the same ip and mac everywhere. no idea where to mention it
+        const char *peer_option = smap_get(&binding->options, "peer");
+        if (!strcmp(binding->type, "l3gateway") && peer_option) {
+            const struct sbrec_port_binding *peer_binding = lport_lookup_by_name(sbrec_port_binding_by_name, peer_option);
+            if (peer_binding) {
+                const char *chassisredirect_option = smap_get(&peer_binding->options, "chassis-redirect-port");
+                if (!strcmp(peer_binding->type, "patch") && chassisredirect_option) {
+                    const struct sbrec_port_binding *cr_binding = lport_lookup_by_name(sbrec_port_binding_by_name, chassisredirect_option);
+                    if (cr_binding && !strcmp(cr_binding->type, "chassisredirect")) {
+                        // TODO felix: the chassisredirect must reside on a chassis where the l3gateway is 
+                        // also on. Need to figure out how to check this.
+                      
+                        struct ha_chassis_ordered *ha_ch_ordered;
+                        ha_ch_ordered = ha_chassis_get_ordered(cr_binding->ha_chassis_group);
+
+                        /* Determine how the port is accessed. */
+                        enum access_type access_type;
+                        if (!ha_ch_ordered || ha_ch_ordered->n_ha_ch < 2) {
+                            access_type = PORT_REMOTE;
+                        } else {
+                            /* It's distributed across the chassis belonging to
+                             * an HA chassis group. */
+                            access_type = PORT_HA_REMOTE;
+                        }
+                        if (access_type == PORT_HA_REMOTE) {
+                            put_remote_port_redirect_overlay_ha_remote(
+                                binding, ha_ch_ordered, mff_ovn_geneve, port_key,
+                                &match, ofpacts_p, chassis_tunnels, flow_table);
+                        } else {
+                            put_remote_port_redirect_overlay(
+                                binding, mff_ovn_geneve, port_key, &match, ofpacts_p,
+                                chassis, chassis_tunnels, n_encap_ips, encap_ips, flow_table);
+                        }
+                        ha_chassis_destroy_ordered(ha_ch_ordered);
+                    }
+
+
+                }
+            }
+        }
         return;
     }
     if (!strcmp(binding->type, "chassisredirect")
