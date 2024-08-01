@@ -308,6 +308,7 @@ BUILD_ASSERT_DECL(ACL_OBS_STAGE_MAX < (1 << 2));
 #define ROUTE_PRIO_OFFSET_MULTIPLIER 3
 #define ROUTE_PRIO_OFFSET_STATIC 1
 #define ROUTE_PRIO_OFFSET_CONNECTED 2
+#define ROUTE_PRIO_OFFSET_SPECIFIC_CHASSIS 512
 
 /* Returns the type of the datapath to which a flow with the given 'stage' may
  * be added. */
@@ -11502,6 +11503,7 @@ struct ecmp_groups_node {
     uint32_t route_table_id;
     uint16_t route_count;
     struct ovs_list route_list; /* Contains ecmp_route_list_node */
+    bool has_different_chassis;
 };
 
 static void
@@ -11518,6 +11520,21 @@ ecmp_groups_add_route(struct ecmp_groups_node *group,
     er->route = route;
     er->id = ++group->route_count;
     ovs_list_insert(&group->route_list, &er->list_node);
+
+    if (!group->has_different_chassis) {
+        struct ecmp_route_list_node *ern;
+        struct sset chassis_names = SSET_INITIALIZER(&chassis_names);
+        LIST_FOR_EACH(ern, list_node, &group->route_list) {
+            if (ern->route->is_discard_route ||
+                !ern->route->out_port->is_active_active) {
+                continue;
+            }
+            sset_add(&chassis_names, ern->route->out_port->aa_chassis_name);
+        }
+        if (sset_count(&chassis_names) > 1) {
+            group->has_different_chassis = true;
+        }
+    }
 }
 
 static struct ecmp_groups_node *
@@ -11539,6 +11556,7 @@ ecmp_groups_add(struct hmap *ecmp_groups,
     eg->is_src_route = route->is_src_route;
     eg->origin = smap_get_def(&route->route->options, "origin", "");
     eg->route_table_id = route->route_table_id;
+    eg->has_different_chassis = false;
     ovs_list_init(&eg->route_list);
     ecmp_groups_add_route(eg, route);
 
@@ -11829,87 +11847,6 @@ add_ecmp_symmetric_reply_flows(struct lflow_table *lflows,
 }
 
 static void
-build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
-                      struct ecmp_groups_node *eg, struct lflow_ref *lflow_ref)
-
-{
-    bool is_ipv4 = IN6_IS_ADDR_V4MAPPED(&eg->prefix);
-    uint16_t priority;
-    struct ecmp_route_list_node *er;
-    struct ds route_match = DS_EMPTY_INITIALIZER;
-
-    char *prefix_s = build_route_prefix_s(&eg->prefix, eg->plen);
-    int ofs = !strcmp(eg->origin, ROUTE_ORIGIN_CONNECTED) ?
-        ROUTE_PRIO_OFFSET_CONNECTED: ROUTE_PRIO_OFFSET_STATIC;
-    build_route_match(NULL, eg->route_table_id, prefix_s, eg->plen,
-                      eg->is_src_route, is_ipv4, &route_match, &priority, ofs);
-    free(prefix_s);
-
-    struct ds actions = DS_EMPTY_INITIALIZER;
-    ds_put_format(&actions, "ip.ttl--; flags.loopback = 1; %s = %"PRIu16
-                  "; %s = select(", REG_ECMP_GROUP_ID, eg->id,
-                  REG_ECMP_MEMBER_ID);
-
-    bool is_first = true;
-    LIST_FOR_EACH (er, list_node, &eg->route_list) {
-        if (is_first) {
-            is_first = false;
-        } else {
-            ds_put_cstr(&actions, ", ");
-        }
-        ds_put_format(&actions, "%"PRIu16, er->id);
-    }
-
-    ds_put_cstr(&actions, ");");
-
-    ovn_lflow_add(lflows, od, S_ROUTER_IN_IP_ROUTING, priority,
-                  ds_cstr(&route_match), ds_cstr(&actions),
-                  lflow_ref);
-
-    /* Add per member flow */
-    struct ds match = DS_EMPTY_INITIALIZER;
-    struct sset visited_ports = SSET_INITIALIZER(&visited_ports);
-    LIST_FOR_EACH (er, list_node, &eg->route_list) {
-        const struct parsed_route *route_ = er->route;
-        const struct nbrec_logical_router_static_route *route = route_->route;
-        /* Symmetric ECMP reply is only usable on gateway routers.
-         * It is NOT usable on distributed routers with a gateway port.
-         */
-        if (smap_get(&od->nbr->options, "chassis") &&
-            route_->ecmp_symmetric_reply && sset_add(&visited_ports,
-                                                     route_->out_port->key)) {
-            add_ecmp_symmetric_reply_flows(lflows, od, route_->lrp_addr_s, 
-                                           route_->out_port,
-                                           route_, &route_match,
-                                           lflow_ref);
-        }
-        ds_clear(&match);
-        ds_put_format(&match, REG_ECMP_GROUP_ID" == %"PRIu16" && "
-                      REG_ECMP_MEMBER_ID" == %"PRIu16,
-                      eg->id, er->id);
-        ds_clear(&actions);
-        ds_put_format(&actions, "%s = %s; "
-                      "%s = %s; "
-                      "eth.src = %s; "
-                      "outport = %s; "
-                      "next;",
-                      is_ipv4 ? REG_NEXT_HOP_IPV4 : REG_NEXT_HOP_IPV6,
-                      route->nexthop,
-                      is_ipv4 ? REG_SRC_IPV4 : REG_SRC_IPV6,
-                      route_->lrp_addr_s,
-                      route_->out_port->lrp_networks.ea_s,
-                      route_->out_port->json_key);
-        ovn_lflow_add_with_hint(lflows, od, S_ROUTER_IN_IP_ROUTING_ECMP, 100,
-                                ds_cstr(&match), ds_cstr(&actions),
-                                &route->header_, lflow_ref);
-    }
-    sset_destroy(&visited_ports);
-    ds_destroy(&match);
-    ds_destroy(&route_match);
-    ds_destroy(&actions);
-}
-
-static void
 add_route(struct lflow_table *lflows, struct ovn_datapath *od,
           const struct ovn_port *op, const char *lrp_addr_s,
           const char *network_s, int plen, const char *gateway,
@@ -11973,6 +11910,98 @@ add_route(struct lflow_table *lflows, struct ovn_datapath *od,
     }
     ds_destroy(&match);
     ds_destroy(&common_actions);
+    ds_destroy(&actions);
+}
+
+
+static void
+build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
+                      const struct sset *bfd_ports,
+                      struct ecmp_groups_node *eg, struct lflow_ref *lflow_ref)
+
+{
+    bool is_ipv4 = IN6_IS_ADDR_V4MAPPED(&eg->prefix);
+    uint16_t priority;
+    struct ecmp_route_list_node *er;
+    struct ds route_match = DS_EMPTY_INITIALIZER;
+
+    char *prefix_s = build_route_prefix_s(&eg->prefix, eg->plen);
+    int ofs = !strcmp(eg->origin, ROUTE_ORIGIN_CONNECTED) ?
+        ROUTE_PRIO_OFFSET_CONNECTED: ROUTE_PRIO_OFFSET_STATIC;
+    build_route_match(NULL, eg->route_table_id, prefix_s, eg->plen,
+                      eg->is_src_route, is_ipv4, &route_match, &priority, ofs);
+
+    struct ds actions = DS_EMPTY_INITIALIZER;
+    ds_put_format(&actions, "ip.ttl--; flags.loopback = 1; %s = %"PRIu16
+                  "; %s = select(", REG_ECMP_GROUP_ID, eg->id,
+                  REG_ECMP_MEMBER_ID);
+
+    bool is_first = true;
+    LIST_FOR_EACH (er, list_node, &eg->route_list) {
+        if (is_first) {
+            is_first = false;
+        } else {
+            ds_put_cstr(&actions, ", ");
+        }
+        ds_put_format(&actions, "%"PRIu16, er->id);
+    }
+
+    ds_put_cstr(&actions, ");");
+
+    ovn_lflow_add(lflows, od, S_ROUTER_IN_IP_ROUTING, priority,
+                  ds_cstr(&route_match), ds_cstr(&actions),
+                  lflow_ref);
+
+    /* Add per member flow */
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct sset visited_ports = SSET_INITIALIZER(&visited_ports);
+    LIST_FOR_EACH (er, list_node, &eg->route_list) {
+        const struct parsed_route *route_ = er->route;
+        const struct nbrec_logical_router_static_route *route = route_->route;
+        /* Symmetric ECMP reply is only usable on gateway routers.
+         * It is NOT usable on distributed routers with a gateway port.
+         */
+        if (smap_get(&od->nbr->options, "chassis") &&
+            route_->ecmp_symmetric_reply && sset_add(&visited_ports,
+                                                     route_->out_port->key)) {
+            add_ecmp_symmetric_reply_flows(lflows, od, route_->lrp_addr_s, 
+                                           route_->out_port,
+                                           route_, &route_match,
+                                           lflow_ref);
+        }
+        ds_clear(&match);
+        ds_put_format(&match, REG_ECMP_GROUP_ID" == %"PRIu16" && "
+                      REG_ECMP_MEMBER_ID" == %"PRIu16,
+                      eg->id, er->id);
+        ds_clear(&actions);
+        ds_put_format(&actions, "%s = %s; "
+                      "%s = %s; "
+                      "eth.src = %s; "
+                      "outport = %s; "
+                      "next;",
+                      is_ipv4 ? REG_NEXT_HOP_IPV4 : REG_NEXT_HOP_IPV6,
+                      route->nexthop,
+                      is_ipv4 ? REG_SRC_IPV4 : REG_SRC_IPV6,
+                      route_->lrp_addr_s,
+                      route_->out_port->lrp_networks.ea_s,
+                      route_->out_port->json_key);
+        ovn_lflow_add_with_hint(lflows, od, S_ROUTER_IN_IP_ROUTING_ECMP, 100,
+                                ds_cstr(&match), ds_cstr(&actions),
+                                &route->header_, lflow_ref);
+
+        if (eg->has_different_chassis && route_->out_port->cr_port) {
+            add_route(lflows, od, route_->out_port, route_->lrp_addr_s,
+                      prefix_s, route_->plen, route->nexthop, route_->is_src_route,
+                      route_->route_table_id, bfd_ports,
+                      &route->header_,
+                      route_->is_discard_route, ROUTE_PRIO_OFFSET_STATIC,
+                      lflow_ref);
+        }
+    }
+    free(prefix_s);
+    sset_destroy(&visited_ports);
+    ds_destroy(&match);
+    ds_destroy(&route_match);
     ds_destroy(&actions);
 }
 
@@ -13812,7 +13841,7 @@ build_static_route_flows_for_lrouter(
     HMAP_FOR_EACH (group, hmap_node, &ecmp_groups) {
         /* add a flow in IP_ROUTING, and one flow for each member in
          * IP_ROUTING_ECMP. */
-        build_ecmp_route_flow(lflows, od, group, lflow_ref);
+        build_ecmp_route_flow(lflows, od, bfd_ports, group, lflow_ref);
     }
     const struct unique_routes_node *ur;
     HMAP_FOR_EACH (ur, hmap_node, &unique_routes) {
