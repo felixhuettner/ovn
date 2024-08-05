@@ -1064,6 +1064,93 @@ get_chassis_external_id_value_bool(const struct smap *external_ids,
     return ret;
 }
 
+bool 
+chassis_find_aa_networks(const struct sbrec_chassis *chassis,
+                         const char* network_name,
+                         struct chassis_aa_network* chassis_aa_network) {
+    memset(chassis_aa_network, 0, sizeof *chassis_aa_network);
+
+    const char* aa_ports = smap_get(&chassis->other_config, "ovn-aa-port-mappings");
+    bool found = false;
+    char *curnet, *nextnet, *curport, *nextport, *start;
+
+    // Structure
+    // ovn-aa-port-mappings="<network>|<network>"
+    // network="<network_name>;<port>;<port>"
+    // port="<mac>,<ip>"
+    nextnet = start = xstrdup(aa_ports);
+    while ((curnet = strsep(&nextnet, "|")) && *curnet) {
+        nextport = curnet;
+        char* network = strsep(&nextport, ";");
+        if (strcmp(network, network_name)) {
+            continue;
+        }
+        found = true;
+        chassis_aa_network->network_name = xstrdup(network);
+        chassis_aa_network->n_addresses = 0;
+        while ((curport = strsep(&nextport, ";")) && *curport) {
+            char *mac, *ip;
+            struct lport_addresses* address;
+
+            mac = strsep(&curport, ",");
+            ip = curport;
+
+            if (!mac || !ip || !*mac || !*ip) {
+                VLOG_ERR("Invalid format for ovn-aa-port-mappings '%s'",
+                         aa_ports);
+                continue;
+            }
+
+            address = xzalloc(sizeof(struct lport_addresses));
+
+            if (!eth_addr_from_string(mac, &address->ea)) {
+                VLOG_ERR("Invalid mac address in ovn-aa-port-mappings '%s'",
+                         aa_ports);
+                free(address);
+                continue;
+            }
+            snprintf(address->ea_s, sizeof address->ea_s, ETH_ADDR_FMT,
+                     ETH_ADDR_ARGS(address->ea));
+
+            ovs_be32 ip4;
+            struct in6_addr ip6;
+            unsigned int plen;
+            char *error;
+
+            error = ip_parse_cidr(ip, &ip4, &plen);
+            if (!error) {
+                if (!ip4) {
+                    VLOG_ERR("Invalid ip address in ovn-aa-port-mappings '%s'",
+                             aa_ports);
+                    continue;
+                }
+
+                add_ipv4_netaddr(address, ip4, plen);
+            } else {
+              free(error);
+
+              error = ipv6_parse_cidr(ip, &ip6, &plen);
+              if (!error) {
+                  add_ipv6_netaddr(address, ip6, plen);
+              } else {
+                  VLOG_ERR("Invalid ip address in ovn-aa-port-mappings '%s'",
+                           aa_ports);
+                  free(error);
+                  continue;
+              }
+            }
+
+            chassis_aa_network->n_addresses++;
+            chassis_aa_network->addresses = xrealloc(chassis_aa_network->addresses,
+                chassis_aa_network->n_addresses * sizeof *chassis_aa_network->addresses);
+            chassis_aa_network->addresses[chassis_aa_network->n_addresses-1] = *address;
+        }
+    }
+
+    free(start);
+    return found;
+}
+
 void flow_collector_ids_init(struct flow_collector_ids *ids)
 {
     ovs_list_init(&ids->list);
