@@ -2339,6 +2339,7 @@ join_logical_ports_lrp(struct hmap *ports,
 
 struct active_active_port {
     const struct nbrec_logical_switch_port *nbsp;
+    const struct nbrec_logical_switch_port *routing_protocol_redirect;
     const struct nbrec_logical_router_port *nbrp;
     struct ovn_datapath *switch_dp;
     struct ovn_datapath *router_dp;
@@ -2406,6 +2407,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
     ovs_list_init(both);
 
     struct shash active_active_ports = SHASH_INITIALIZER(&active_active_ports);
+    struct shash aa_redirect_targets = SHASH_INITIALIZER(&aa_redirect_targets);
 
     const struct sbrec_port_binding *sb;
     SBREC_PORT_BINDING_TABLE_FOR_EACH (sb, sbrec_pb_table) {
@@ -2434,6 +2436,12 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
                 aap->nbrp = nbrp;
                 aap->router_dp = od;
                 shash_add(&active_active_ports, nbrp->name, aap);
+
+                const char *redirect_port_name = smap_get(&nbrp->options,
+                                              "routing-protocol-redirect");
+                if (redirect_port_name) {
+                    shash_add(&aa_redirect_targets, redirect_port_name, aap);
+                }
                 continue;
             }
 
@@ -2462,6 +2470,12 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
                 ovs_assert(aap);
                 aap->nbsp = nbsp;
                 aap->switch_dp = od;
+                continue;
+            }
+            struct active_active_port *aap =
+                shash_find_data(&aa_redirect_targets, nbsp->name);
+            if (aap) {
+                aap->routing_protocol_redirect = nbsp;
                 continue;
             }
             join_logical_ports_lsp(ports, nb_only, both, od, nbsp,
@@ -2546,6 +2560,8 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
     SHASH_FOR_EACH (aa_snode, &active_active_ports) {
         const struct active_active_port *aap = aa_snode->data;
         const struct nbrec_logical_switch_port *nbsp = aap->nbsp;
+        const struct nbrec_logical_switch_port *nbsp_rpr =
+            aap->routing_protocol_redirect;
         const struct nbrec_logical_router_port *nbrp = aap->nbrp; 
         ovs_assert(nbrp);
         ovs_assert(aap->switch_dp);
@@ -2629,6 +2645,16 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
                 lsp->aa_chassis_name = xstrdup(chassis->name);
                 lrp->aa_chassis_index = j;
                 lsp->aa_chassis_index = j;
+
+                if (nbsp_rpr) {
+                    char *lsp_rpr_name = xasprintf("%s-%s-%"PRIuSIZE,
+                                                     nbsp_rpr->name,
+                                                     chassis->name, j);
+                    join_logical_ports_lsp(ports, nb_only, both,
+                                           aap->switch_dp, nbsp_rpr,
+                                           lsp_rpr_name, queue_id_bitmap,
+                                           tag_alloc_table);
+                }
             }
         }
     }
@@ -14219,6 +14245,16 @@ build_arp_resolve_flows_for_lrp(struct ovn_port *op,
     }
 }
 
+static const char*
+ovn_port_get_redirect_port_name(struct ovn_port *op) {
+    const char* rpr = smap_get(&op->nbrp->options, "routing-protocol-redirect");
+    if (op->is_active_active && rpr) {
+        return xasprintf("%s-%s-%"PRIuSIZE, rpr,
+                         op->aa_chassis_name, op->aa_chassis_index);
+    }
+    return rpr;
+}
+
 static void
 build_routing_protocols_redirect_rule__(
         const char *s_addr, const char *redirect_port_name, int protocol_port,
@@ -14352,8 +14388,7 @@ build_lrouter_routing_protocol_redirect(
     /* Proceed only for LRPs that have 'routing-protocol-redirect' option set.
      * Value of this option is the name of LSP to which the routing protocol
      * traffic will be redirected. */
-    const char *redirect_port_name = smap_get(&op->nbrp->options,
-                                              "routing-protocol-redirect");
+    const char *redirect_port_name = ovn_port_get_redirect_port_name(op);
     if (!redirect_port_name) {
         return;
     }
