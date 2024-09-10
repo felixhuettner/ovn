@@ -4780,6 +4780,7 @@ en_route_exchange_run(struct engine_node *node, void *data)
             engine_get_input("SB_route", node), "datapath");
 
     struct route_exchange_ctx_in r_ctx_in = {
+        .ovnsb_idl_txn = engine_get_context()->ovnsb_idl_txn,
         .sbrec_port_binding_by_name = sbrec_port_binding_by_name,
         .chassis_rec = chassis,
         .active_tunnels = &rt_data->active_tunnels,
@@ -4815,6 +4816,15 @@ en_route_exchange_cleanup(void *data)
     struct ed_type_route_exchange *re_data = data;
 
     tracked_datapaths_destroy(&re_data->tracked_re_datapaths);
+}
+
+static void
+en_route_exchange_clear_tracked_data(void *data)
+{
+    struct ed_type_route_exchange *re_data = data;
+
+    tracked_datapaths_destroy(&re_data->tracked_re_datapaths);
+    hmap_init(&re_data->tracked_re_datapaths);
 }
 
 static bool
@@ -5145,7 +5155,7 @@ main(int argc, char *argv[])
     ENGINE_NODE(if_status_mgr, "if_status_mgr");
     ENGINE_NODE_WITH_CLEAR_TRACK_DATA(lb_data, "lb_data");
     ENGINE_NODE(mac_cache, "mac_cache");
-    ENGINE_NODE(route_exchange, "route_exchange");
+    ENGINE_NODE_WITH_CLEAR_TRACK_DATA(route_exchange, "route_exchange");
 
 #define SB_NODE(NAME, NAME_STR) ENGINE_NODE_SB(NAME, NAME_STR);
     SB_NODES

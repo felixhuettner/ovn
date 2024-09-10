@@ -27,6 +27,7 @@
 #include "openvswitch/ofpbuf.h"
 #include "openvswitch/vlog.h"
 #include "packets.h"
+#include "ovn-util.h"
 
 #include "route-exchange-netlink.h"
 
@@ -177,12 +178,6 @@ re_nl_delete_route(const char * netns, uint32_t table_id, struct in6_addr *dst, 
     return modify_route(netns, RTM_DELROUTE, 0, table_id, dst, plen, 0);
 }
 
-struct route_node {
-    struct hmap_node hmap_node;
-    struct in6_addr addr;
-    unsigned int plen;
-};
-
 static uint32_t
 route_hash(const struct in6_addr *dst, unsigned int plen)
 {
@@ -191,11 +186,11 @@ route_hash(const struct in6_addr *dst, unsigned int plen)
 }
 
 void
-route_insert(struct hmap *host_routes,
+route_insert(struct hmap *routes,
              struct in6_addr *dst, unsigned int plen)
 {
-    struct route_node *hr = xzalloc(sizeof *hr);
-    hmap_insert(host_routes, &hr->hmap_node,
+    struct advertise_route_node *hr = xzalloc(sizeof *hr);
+    hmap_insert(routes, &hr->hmap_node,
                 route_hash(dst, plen));
     hr->addr = *dst;
     hr->plen = plen;
@@ -204,7 +199,7 @@ route_insert(struct hmap *host_routes,
 void
 routes_destroy(struct hmap *host_routes)
 {
-    struct route_node *hr;
+    struct advertise_route_node *hr;
     HMAP_FOR_EACH_SAFE (hr, hmap_node, host_routes) {
         hmap_remove(host_routes, &hr->hmap_node);
         free(hr);
@@ -214,6 +209,7 @@ routes_destroy(struct hmap *host_routes)
 
 struct route_msg_handle_data {
     struct hmap *routes;
+    struct hmap *learned_routes;
     const char *netns;
 };
 
@@ -223,24 +219,37 @@ handle_route_msg_delete_routes(struct route_table_msg *msg, void *data)
     struct route_data *rd = &msg->rd;
     struct route_msg_handle_data *handle_data = data;
     struct hmap *routes = handle_data->routes;
-    struct route_node *hr;
+    struct advertise_route_node *ar;
     int err;
 
-    // This route is not from us, we should not touch it.
+    /* This route is not from us, so we learn it. */
     if (rd->rtm_protocol != RTPROT_OVN) {
+        if (prefix_is_link_local(&rd->rta_dst, rd->plen)) {
+            return;
+        }
+        if (IN6_IS_ADDR_UNSPECIFIED(&rd->rta_gw)) {
+            /* This is most likely an address on the local link.
+             * Since we just want to learn remote routes we do not need it. */
+            return;
+        }
+        struct receive_route_node *rr = xzalloc(sizeof *rr);
+        hmap_insert(handle_data->learned_routes, &rr->hmap_node,
+                    route_hash(&rd->rta_dst, rd->plen));
+        rr->addr = rd->rta_dst;
+        rr->plen = rd->plen;
+        rr->nexthop = rd->rta_gw;
         return;
     }
 
     uint32_t hash = route_hash(&rd->rta_dst, rd->plen);
-    HMAP_FOR_EACH_WITH_HASH (hr, hmap_node, hash, routes) {
-        if (ipv6_addr_equals(&hr->addr, &rd->rta_dst)
-                && hr->plen == rd->plen) {
-            hmap_remove(routes, &hr->hmap_node);
-            free(hr);
+    HMAP_FOR_EACH_WITH_HASH (ar, hmap_node, hash, routes) {
+        if (ipv6_addr_equals(&ar->addr, &rd->rta_dst)
+                && ar->plen == rd->plen) {
+            hmap_remove(routes, &ar->hmap_node);
+            free(ar);
             return;
         }
     }
-    printf("i should do stuff now, like delete routes\n");
     err = re_nl_delete_route(handle_data->netns,
                              rd->rta_table_id, &rd->rta_dst,
                              rd->plen);
@@ -257,7 +266,8 @@ handle_route_msg_delete_routes(struct route_table_msg *msg, void *data)
 
 void
 re_nl_sync_routes(uint32_t table_id,
-                  struct hmap *routes, bool use_netns)
+                  struct hmap *routes, struct hmap *learned_routes,
+                  bool use_netns)
 {
 
     char * netns = NULL;
@@ -272,6 +282,7 @@ re_nl_sync_routes(uint32_t table_id,
      * in the system. */
     struct route_msg_handle_data data = {
         .routes = routes,
+        .learned_routes = learned_routes,
         .netns = netns,
     };
     route_table_dump_one_table(netns, table_id, handle_route_msg_delete_routes,
@@ -279,7 +290,7 @@ re_nl_sync_routes(uint32_t table_id,
 
     /* Add any remaining routes in the host_routes hmap to the system routing
      * table. */
-    struct route_node *hr;
+    struct advertise_route_node *hr;
     HMAP_FOR_EACH_SAFE (hr, hmap_node, routes) {
         int err = re_nl_add_route(netns, table_id, &hr->addr, hr->plen);
         if (err) {
