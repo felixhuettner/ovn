@@ -32,6 +32,7 @@
  * - Add rta_table_id.
  * - Add plen.
  * - Add rtm_protocol
+ * - Add rta_metrics
  *
  * route_table_parse():
  *
@@ -73,6 +74,7 @@ struct route_data {
     uint32_t rta_table_id; /* 0 if missing. */
     unsigned char plen;
     unsigned char rtm_protocol;
+    uint32_t rta_priority;
 };
 
 /* A digested version of a route message sent down by the kernel to indicate
@@ -724,6 +726,7 @@ route_table_parse(struct ofpbuf *buf, struct route_table_msg *change)
         [RTA_MARK] = { .type = NL_A_U32, .optional = true },
         [RTA_PREFSRC] = { .type = NL_A_U32, .optional = true },
         [RTA_TABLE] = { .type = NL_A_U32, .optional = true },
+        [RTA_PRIORITY] = { .type = NL_A_U32, .optional = true },
     };
 
     static const struct nl_policy policy6[] = {
@@ -733,6 +736,7 @@ route_table_parse(struct ofpbuf *buf, struct route_table_msg *change)
         [RTA_GATEWAY] = { .type = NL_A_IPV6, .optional = true },
         [RTA_PREFSRC] = { .type = NL_A_IPV6, .optional = true },
         [RTA_TABLE] = { .type = NL_A_U32, .optional = true },
+        [RTA_PRIORITY] = { .type = NL_A_U32, .optional = true },
     };
 
     struct nlattr *attrs[ARRAY_SIZE(policy)];
@@ -830,6 +834,9 @@ route_table_parse(struct ofpbuf *buf, struct route_table_msg *change)
         }
         if (attrs[RTA_MARK]) {
             change->rd.mark = nl_attr_get_u32(attrs[RTA_MARK]);
+        }
+        if (attrs[RTA_PRIORITY]) {
+            change->rd.rta_priority = nl_attr_get_u32(attrs[RTA_PRIORITY]);
         }
     } else {
         VLOG_DBG_RL(&rl, "received unparseable rtnetlink route message");
