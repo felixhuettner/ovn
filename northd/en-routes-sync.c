@@ -17,6 +17,7 @@
 #include <config.h>
 
 #include "openvswitch/vlog.h"
+#include "smap.h"
 #include "stopwatch.h"
 #include "northd.h"
 
@@ -362,6 +363,13 @@ publish_host_routes(struct ovsdb_idl_txn *ovnsb_txn,
     }
 }
 
+static bool
+get_nbrp_or_nbr_option(const struct ovn_port *op, const char *key)
+{
+    return smap_get_bool(&op->nbrp->options, key,
+        smap_get_bool(&op->od->nbr->options, key, false));
+}
+
 static void
 routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
                   const struct sbrec_route_table *sbrec_route_table,
@@ -409,10 +417,10 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
         if (!smap_get_bool(&route->od->nbr->options, "dynamic-routing", false)) {
             continue;
         }
-        if (route->source == ROUTE_SOURCE_CONNECTED && !smap_get_bool(&route->out_port->nbrp->options, "dynamic-routing-connected", false)) {
+        if (route->source == ROUTE_SOURCE_CONNECTED && !get_nbrp_or_nbr_option(route->out_port, "dynamic-routing-connected")) {
             continue;
         }
-        if (route->source == ROUTE_SOURCE_STATIC && !smap_get_bool(&route->out_port->nbrp->options, "dynamic-routing-static", false)) {
+        if (route->source == ROUTE_SOURCE_STATIC && !get_nbrp_or_nbr_option(route->out_port, "dynamic-routing-static")) {
             continue;
         }
 
@@ -434,7 +442,7 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
     HMAP_FOR_EACH_POP (route_e, hmap_node, &sync_routes) {
         /* `receive` routes are added by ovn-controller we should only read but
          * not remove them */
-        if (!strcmp(route_e->sb_route->type, "receive") &&
+        if (strcmp(route_e->sb_route->type, "receive") &&
                 route_e->stale) {
             sbrec_route_delete(route_e->sb_route);
         }
