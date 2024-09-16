@@ -432,12 +432,10 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
     }
 
     HMAP_FOR_EACH_POP (route_e, hmap_node, &sync_routes) {
-        /* These routes are added by ovn-controller we should only read but
+        /* `receive` routes are added by ovn-controller we should only read but
          * not remove them */
-        if (!strcmp(route_e->sb_route->type, "receive")) {
-            continue;
-        }
-        if (route_e->stale) {
+        if (!strcmp(route_e->sb_route->type, "receive") &&
+                route_e->stale) {
             sbrec_route_delete(route_e->sb_route);
         }
         route_erase_entry(route_e);
