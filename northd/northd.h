@@ -732,7 +732,7 @@ struct parsed_route {
     bool stale;
     enum route_source source;
     const struct ovsdb_idl_row *source_hint;
-    const char *lrp_addr_s;
+    char *lrp_addr_s;
     const struct ovn_port *out_port;
 };
 
