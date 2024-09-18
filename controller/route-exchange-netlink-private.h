@@ -726,6 +726,7 @@ route_table_parse(struct ofpbuf *buf, struct route_table_msg *change)
         [RTA_MARK] = { .type = NL_A_U32, .optional = true },
         [RTA_PREFSRC] = { .type = NL_A_U32, .optional = true },
         [RTA_TABLE] = { .type = NL_A_U32, .optional = true },
+        [RTA_PRIORITY] = { .type = NL_A_U32, .optional = true },
     };
 
     static const struct nl_policy policy6[] = {
@@ -735,6 +736,7 @@ route_table_parse(struct ofpbuf *buf, struct route_table_msg *change)
         [RTA_GATEWAY] = { .type = NL_A_IPV6, .optional = true },
         [RTA_PREFSRC] = { .type = NL_A_IPV6, .optional = true },
         [RTA_TABLE] = { .type = NL_A_U32, .optional = true },
+        [RTA_PRIORITY] = { .type = NL_A_U32, .optional = true },
     };
 
     struct nlattr *attrs[ARRAY_SIZE(policy)];
