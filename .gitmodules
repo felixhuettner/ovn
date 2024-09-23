@@ -1,3 +1,4 @@
 [submodule "ovs"]
 	path = ovs
-	url = https://github.com/openvswitch/ovs.git
+	url = https://github.com/felixhuettner/ovs.git
+	branch = test_active_active_routing_v4
