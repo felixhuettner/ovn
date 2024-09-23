@@ -28,15 +28,13 @@
 #include "openvswitch/vlog.h"
 #include "packets.h"
 #include "ovn-util.h"
+#include "netlink-socket.h"
+#include "route-table.h"
 
 #include "route-exchange-netlink.h"
 
 VLOG_DEFINE_THIS_MODULE(route_exchange_netlink);
 static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);
-
-/* Due to inlining of vendored code from OVS lib/route-table.c, we need to
- * include this after the above VLOG statements. */
-#include "route-exchange-netlink-private.h"
 
 #define TABLE_ID_VALID(table_id) (table_id != RT_TABLE_UNSPEC &&              \
                                   table_id != RT_TABLE_COMPAT &&              \
@@ -75,7 +73,7 @@ modify_vrf(uint32_t type, uint32_t flags_arg,
     nl_msg_end_nested(&request, linkinfo_off);
 
 out:
-    err = nl_transact(NETLINK_ROUTE, &request, NULL);
+    err = nl_transact(NULL, NETLINK_ROUTE, &request, NULL);
 
     ofpbuf_uninit(&request);
 
@@ -105,9 +103,9 @@ re_nl_delete_vrf(const char *ifname)
 }
 
 static int
-modify_route(const char *netns, uint32_t type, uint32_t flags_arg, uint32_t table_id,
-             struct in6_addr *dst, unsigned int plen, unsigned int priority,
-             uint32_t oif)
+modify_route(const char *netns, uint32_t type, uint32_t flags_arg,
+             uint32_t table_id, const struct in6_addr *dst,
+             unsigned int plen, unsigned int priority, uint32_t oif)
 {
     uint32_t flags = NLM_F_REQUEST | NLM_F_ACK;
     bool is_ipv4 = IN6_IS_ADDR_V4MAPPED(dst);
@@ -145,14 +143,15 @@ modify_route(const char *netns, uint32_t type, uint32_t flags_arg, uint32_t tabl
         nl_msg_put_u32(&request, RTA_OIF, oif);
     }
 
-    err = nl_ns_transact(netns, NETLINK_ROUTE, &request, NULL);
+    err = nl_transact(netns, NETLINK_ROUTE, &request, NULL);
     ofpbuf_uninit(&request);
 
     return err;
 }
 
 int
-re_nl_add_route(const char *netns, uint32_t table_id, struct in6_addr *dst,
+re_nl_add_route(const char *netns, uint32_t table_id,
+                const struct in6_addr *dst,
                 unsigned int plen, unsigned int priority)
 {
     uint32_t flags = NLM_F_CREATE | NLM_F_EXCL;
@@ -169,7 +168,8 @@ re_nl_add_route(const char *netns, uint32_t table_id, struct in6_addr *dst,
 }
 
 int
-re_nl_delete_route(const char * netns, uint32_t table_id, struct in6_addr *dst,
+re_nl_delete_route(const char * netns, uint32_t table_id,
+                   const struct in6_addr *dst,
                    unsigned int plen, unsigned int priority)
 {
     if (!TABLE_ID_VALID(table_id)) {
@@ -219,9 +219,9 @@ struct route_msg_handle_data {
 };
 
 static void
-handle_route_msg_delete_routes(struct route_table_msg *msg, void *data)
+handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
 {
-    struct route_data *rd = &msg->rd;
+    const struct route_data *rd = &msg->rd;
     struct route_msg_handle_data *handle_data = data;
     struct hmap *routes = handle_data->routes;
     struct advertise_route_node *ar;
