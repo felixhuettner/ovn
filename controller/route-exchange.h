@@ -28,7 +28,7 @@ struct sset;
 struct route_exchange_ctx_in {
     struct ovsdb_idl_txn *ovnsb_idl_txn;
     struct ovsdb_idl_index *sbrec_port_binding_by_name;
-    const struct sbrec_chassis *chassis_rec;
+    const struct sbrec_chassis *chassis;
     const struct sset *active_tunnels;
     struct hmap *local_datapaths;
     const struct sset *local_lports;
