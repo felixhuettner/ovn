@@ -55,7 +55,6 @@ controller_ovn_controller_SOURCES = \
 if HAVE_NETLINK
 controller_ovn_controller_SOURCES += \
 	controller/route-exchange-netlink.h \
-	controller/route-exchange-netlink-private.h \
 	controller/route-exchange-netlink.c \
 	controller/route-exchange.c
 else
