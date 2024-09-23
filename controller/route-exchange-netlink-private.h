@@ -644,6 +644,7 @@ nl_ns_pool_alloc(const char *netns, int protocol, struct nl_sock **sockp)
         }
         char *netns_path = xasprintf("/var/run/netns/%s", netns);
         ns_fd = open(netns_path, O_RDONLY);
+        free(netns_path);
         if (ns_fd < 0) {
             printf("something wrong when opening other net fd, %d\n", errno);
         }
