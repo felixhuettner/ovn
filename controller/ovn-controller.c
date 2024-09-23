@@ -4664,7 +4664,7 @@ en_route_exchange_run(struct engine_node *node, void *data)
         .ovnsb_idl_txn = engine_get_context()->ovnsb_idl_txn,
         .sbrec_port_binding_by_name = sbrec_port_binding_by_name,
         .lb_table = lb_table,
-        .chassis_rec = chassis,
+        .chassis = chassis,
         .active_tunnels = &rt_data->active_tunnels,
         .local_datapaths = &rt_data->local_datapaths,
         .local_lbs = &lb_data->local_lbs,
@@ -5119,8 +5119,7 @@ main(int argc, char *argv[])
 
     engine_add_input(&en_route_exchange, &en_ovs_open_vswitch, NULL);
     engine_add_input(&en_route_exchange, &en_sb_chassis, NULL);
-    engine_add_input(&en_route_exchange, &en_sb_port_binding,
-                     engine_noop_handler);
+    engine_add_input(&en_route_exchange, &en_sb_port_binding, NULL);
     engine_add_input(&en_route_exchange, &en_runtime_data,
                      route_exchange_runtime_data_handler);
     engine_add_input(&en_route_exchange, &en_sb_load_balancer,

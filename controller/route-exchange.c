@@ -181,8 +181,9 @@ route_exchange_relevant_port(const struct sbrec_port_binding *pb)
 }
 
 static const struct sbrec_port_binding*
-find_local_crp(const struct sset *local_lports,
-               struct ovsdb_idl_index *sbrec_port_binding_by_name,
+find_local_crp(struct ovsdb_idl_index *sbrec_port_binding_by_name,
+               const struct sbrec_chassis *chassis,
+               const struct sset *active_tunnels,
                const struct sbrec_port_binding *pb)
 {
     if (!pb) {
@@ -192,10 +193,23 @@ find_local_crp(const struct sset *local_lports,
     if (!crp) {
         return NULL;
     }
-    if (!sset_contains(local_lports, crp)) {
+    if (!lport_is_chassis_resident(sbrec_port_binding_by_name, chassis, active_tunnels, crp)) {
         return NULL;
     }
     return lport_lookup_by_name(sbrec_port_binding_by_name, crp);
+}
+
+static const struct sbrec_port_binding*
+find_local_crp_by_name(struct ovsdb_idl_index *sbrec_port_binding_by_name,
+               const struct sbrec_chassis *chassis,
+               const struct sset *active_tunnels,
+               const char *port_name)
+{
+    const struct sbrec_port_binding *pb = lport_lookup_by_name(
+        sbrec_port_binding_by_name, port_name);
+
+    return find_local_crp(sbrec_port_binding_by_name, chassis, active_tunnels,
+                          pb);
 }
 
 void
@@ -226,8 +240,9 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
             const struct sbrec_port_binding *local_peer
                 = ld->peer_ports[i].local;
             const struct sbrec_port_binding *sb_crp = find_local_crp(
-                r_ctx_in->local_lports,
                 r_ctx_in->sbrec_port_binding_by_name,
+                r_ctx_in->chassis,
+                r_ctx_in->active_tunnels,
                 ld->peer_ports[i].local);
             if (!route_exchange_relevant_port(sb_crp)) {
                 continue;
@@ -301,11 +316,7 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
             unsigned int priority = PRIORITY_DEFAULT;
 
             if (route->tracked_port) {
-                const struct sbrec_port_binding *tracked_port = lport_lookup_by_name(r_ctx_in->sbrec_port_binding_by_name, route->tracked_port);
-                if(tracked_port && find_local_crp(
-                          r_ctx_in->local_lports,
-                          r_ctx_in->sbrec_port_binding_by_name,
-                          tracked_port)) {
+                if (find_local_crp_by_name(r_ctx_in->sbrec_port_binding_by_name, r_ctx_in->chassis, r_ctx_in->active_tunnels, route->tracked_port)) {
                     priority = PRIORITY_LOCAL_BOUND;
                 }
             }
