@@ -19,29 +19,16 @@
 
 #include <stdbool.h>
 
-struct hmap;
-struct ovsdb_idl_index;
-struct sbrec_chassis;
-struct sbrec_port_binding;
-struct sset;
-
 struct route_exchange_ctx_in {
     struct ovsdb_idl_txn *ovnsb_idl_txn;
-    struct ovsdb_idl_index *sbrec_port_binding_by_name;
-    const struct sbrec_load_balancer_table *lb_table;
-    const struct sbrec_chassis *chassis;
-    const struct sset *active_tunnels;
-    struct hmap *local_datapaths;
-    struct hmap *local_lbs;
-    const struct sset *local_lports;
     struct ovsdb_idl_index *sbrec_route_by_datapath;
+    /* Contains struct advertise_datapath_entry */
+    struct hmap *announce_routes;
 };
 
 struct route_exchange_ctx_out {
-    struct hmap *tracked_re_datapaths;
 };
 
-bool route_exchange_relevant_port(const struct sbrec_port_binding *pb);
 void route_exchange_run(struct route_exchange_ctx_in *,
                         struct route_exchange_ctx_out *);
 void route_exchange_cleanup(void);

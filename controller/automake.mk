@@ -50,7 +50,9 @@ controller_ovn_controller_SOURCES = \
 	controller/statctrl.c \
 	controller/ct-zone.h \
 	controller/ct-zone.c \
-	controller/route-exchange.h
+	controller/route-exchange.h \
+	controller/route.h \
+	controller/route.c
 
 if HAVE_NETLINK
 controller_ovn_controller_SOURCES += \

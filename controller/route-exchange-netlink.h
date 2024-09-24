@@ -22,14 +22,7 @@
 #include "openvswitch/hmap.h"
 #include <netinet/in.h>
 
-struct advertise_route_node {
-    struct hmap_node hmap_node;
-    struct in6_addr addr;
-    unsigned int plen;
-    unsigned int priority;
-};
-
-struct receive_route_node {
+struct received_route_node {
     struct hmap_node hmap_node;
     struct in6_addr addr;
     unsigned int plen;
@@ -48,12 +41,10 @@ int re_nl_delete_route(const char *netns, uint32_t table_id,
 
 void re_nl_dump(uint32_t table_id);
 
-void route_insert(struct hmap *routes,
-                  struct in6_addr *dst, unsigned int plen,
-                  unsigned int priority);
-void routes_destroy(struct hmap *);
+void received_routes_destroy(struct hmap *);
 void re_nl_sync_routes(uint32_t table_id,
-                       struct hmap *host_routes, struct hmap *learned_routes,
+                       const struct hmap *host_routes,
+                       struct hmap *learned_routes,
                        bool use_netns);
 
 #endif /* route-exchange-netlink.h */

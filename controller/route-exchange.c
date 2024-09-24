@@ -25,8 +25,8 @@
 
 #include "binding.h"
 #include "ha-chassis.h"
-#include "lb.h"
 #include "local_data.h"
+#include "route.h"
 #include "route-exchange.h"
 #include "route-exchange-netlink.h"
 
@@ -140,7 +140,7 @@ sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
     }
     sbrec_route_index_destroy_row(filter);
 
-    struct receive_route_node *learned_route;
+    struct received_route_node *learned_route;
     HMAP_FOR_EACH(learned_route, hmap_node, learned_routes) {
         char *ip_prefix = normalize_v46_prefix(&learned_route->addr, learned_route->plen);
         char *nexthop = normalize_v46(&learned_route->nexthop);
@@ -174,172 +174,44 @@ sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
     hmap_destroy(&sync_routes);
 }
 
-bool
-route_exchange_relevant_port(const struct sbrec_port_binding *pb)
-{
-    return (pb && smap_get_bool(&pb->options, "dynamic-routing", false));
-}
-
-static const struct sbrec_port_binding*
-find_local_crp(struct ovsdb_idl_index *sbrec_port_binding_by_name,
-               const struct sbrec_chassis *chassis,
-               const struct sset *active_tunnels,
-               const struct sbrec_port_binding *pb)
-{
-    if (!pb) {
-        return NULL;
-    }
-    const char *crp = smap_get(&pb->options, "chassis-redirect-port");
-    if (!crp) {
-        return NULL;
-    }
-    if (!lport_is_chassis_resident(sbrec_port_binding_by_name, chassis, active_tunnels, crp)) {
-        return NULL;
-    }
-    return lport_lookup_by_name(sbrec_port_binding_by_name, crp);
-}
-
-static const struct sbrec_port_binding*
-find_local_crp_by_name(struct ovsdb_idl_index *sbrec_port_binding_by_name,
-               const struct sbrec_chassis *chassis,
-               const struct sset *active_tunnels,
-               const char *port_name)
-{
-    const struct sbrec_port_binding *pb = lport_lookup_by_name(
-        sbrec_port_binding_by_name, port_name);
-
-    return find_local_crp(sbrec_port_binding_by_name, chassis, active_tunnels,
-                          pb);
-}
-
 void
 route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
-                   struct route_exchange_ctx_out *r_ctx_out)
+                   struct route_exchange_ctx_out *r_ctx_out OVS_UNUSED)
 {
     struct sset old_maintained_vrfs = SSET_INITIALIZER(&old_maintained_vrfs);
     sset_swap(&_maintained_vrfs, &old_maintained_vrfs);
 
-    const struct local_datapath *ld;
-    HMAP_FOR_EACH (ld, hmap_node, r_ctx_in->local_datapaths) {
-        if (!ld->n_peer_ports || ld->is_switch) {
-            continue;
-        }
-
-        bool maintain_vrf = false;
-        bool use_netns = false;
-        bool relevant_datapath = false;
-        struct hmap local_routes
-            = HMAP_INITIALIZER(&local_routes);
-        struct hmap learned_routes
-            = HMAP_INITIALIZER(&learned_routes);
-        struct sset bound_ports = SSET_INITIALIZER(&bound_ports);
-
-        /* This is a LR datapath, find LRPs with route exchange options
-         * that are bound locally. */
-        for (size_t i = 0; i < ld->n_peer_ports; i++) {
-            const struct sbrec_port_binding *local_peer
-                = ld->peer_ports[i].local;
-            const struct sbrec_port_binding *sb_crp = find_local_crp(
-                r_ctx_in->sbrec_port_binding_by_name,
-                r_ctx_in->chassis,
-                r_ctx_in->active_tunnels,
-                ld->peer_ports[i].local);
-            if (!route_exchange_relevant_port(sb_crp)) {
-                continue;
-            }
-
-            maintain_vrf |= smap_get_bool(&sb_crp->options,
-                                          "maintain-vrf", false);
-            use_netns |= smap_get_bool(&sb_crp->options,
-                                       "use-netns", false);
-            relevant_datapath = true;
-            sset_add(&bound_ports, local_peer->logical_port);
-        }
-
-        if (!relevant_datapath) {
-            continue;
-        }
-
-        /* While tunnel_key would most likely never be negative, the compiler
-         * has opinions if we don't check before using it in snprintf below. */
-        if (ld->datapath->tunnel_key < 0 ||
-            ld->datapath->tunnel_key > MAX_TABLE_ID) {
-            VLOG_WARN_RL(&rl,
-                         "skip route sync for datapath "UUID_FMT", "
-                         "tunnel_key %"PRIi64" would make VRF interface name "
-                         "overflow.",
-                         UUID_ARGS(&ld->datapath->header_.uuid),
-                         ld->datapath->tunnel_key);
-            goto out;
-        }
+    const struct advertise_datapath_entry *ad;
+    HMAP_FOR_EACH (ad, node, r_ctx_in->announce_routes) {
+        struct hmap received_routes
+                = HMAP_INITIALIZER(&received_routes);
         char vrf_name[IFNAMSIZ + 1];
         snprintf(vrf_name, sizeof vrf_name, "ovnvrf%"PRIi64,
-                 ld->datapath->tunnel_key);
+                 ad->key);
 
-        if (maintain_vrf && use_netns) {
-            VLOG_WARN_RL(&rl,
-                         "For VRF %s both maintain-vrf and use-netns are set, "
-                         "this will never work", vrf_name);
-            goto out;
-        }
-
-        if (maintain_vrf) {
-            int error = re_nl_create_vrf(vrf_name, ld->datapath->tunnel_key);
+        if (ad->maintain_vrf) {
+            int error = re_nl_create_vrf(vrf_name, ad->key);
             if (error && error != EEXIST) {
                 VLOG_WARN_RL(&rl,
-                             "Unable to create VRF %s for datapath "UUID_FMT
-                             ": %s.",
-                             vrf_name, UUID_ARGS(&ld->datapath->header_.uuid),
+                             "Unable to create VRF %s for datapath "
+                             "%ld: %s.",
+                             vrf_name, ad->key,
                              ovs_strerror(error));
                 goto out;
             }
             sset_add(&_maintained_vrfs, vrf_name);
         }
 
-        struct sbrec_route *route_filter = sbrec_route_index_init_row(
-            r_ctx_in->sbrec_route_by_datapath);
-        sbrec_route_index_set_datapath(route_filter, ld->datapath);
-        struct sbrec_route *route;
-        SBREC_ROUTE_FOR_EACH_EQUAL(route, route_filter, r_ctx_in->sbrec_route_by_datapath) {
-            if (!strcmp(route->type, "receive")) {
-                continue;
-            }
-            struct in6_addr prefix;
-            unsigned int plen;
-            if (!ip46_parse_cidr(route->ip_prefix, &prefix, &plen)) {
-                VLOG_WARN_RL(&rl, "bad 'ip_prefix' %s in route "
-                             UUID_FMT, route->ip_prefix,
-                             UUID_ARGS(&route->header_.uuid));
-                continue;
-            }
+        re_nl_sync_routes(ad->key,
+                          &ad->routes, &received_routes, ad->use_netns);
 
-            unsigned int priority = PRIORITY_DEFAULT;
-
-            if (route->tracked_port) {
-                if (find_local_crp_by_name(r_ctx_in->sbrec_port_binding_by_name, r_ctx_in->chassis, r_ctx_in->active_tunnels, route->tracked_port)) {
-                    priority = PRIORITY_LOCAL_BOUND;
-                }
-            }
-
-            route_insert(&local_routes, &prefix, plen, priority);
-        }
-        sbrec_route_index_destroy_row(route_filter);
-
-        if (!hmap_is_empty(&local_routes)) {
-            tracked_datapath_add(ld->datapath, TRACKED_RESOURCE_NEW,
-                                 r_ctx_out->tracked_re_datapaths);
-        }
-        re_nl_sync_routes(ld->datapath->tunnel_key,
-                          &local_routes, &learned_routes, use_netns);
-
-        sb_sync_learned_routes(ld->datapath, &learned_routes, &bound_ports,
+        sb_sync_learned_routes(ad->db, &received_routes,
+                               &ad->bound_ports,
                                r_ctx_in->ovnsb_idl_txn,
                                r_ctx_in->sbrec_route_by_datapath);
 
 out:
-        routes_destroy(&local_routes);
-        routes_destroy(&learned_routes);
-        sset_destroy(&bound_ports);
+        received_routes_destroy(&received_routes);
     }
 
     /* Remove VRFs previously maintained by us not found in the above loop. */

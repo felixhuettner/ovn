@@ -30,6 +30,7 @@
 #include "ovn-util.h"
 #include "netlink-socket.h"
 #include "route-table.h"
+#include "route.h"
 
 #include "route-exchange-netlink.h"
 
@@ -190,30 +191,18 @@ route_hash(const struct in6_addr *dst, unsigned int plen)
 }
 
 void
-route_insert(struct hmap *routes,
-             struct in6_addr *dst, unsigned int plen, unsigned int priority)
+received_routes_destroy(struct hmap *host_routes)
 {
-    struct advertise_route_node *hr = xzalloc(sizeof *hr);
-    hmap_insert(routes, &hr->hmap_node,
-                route_hash(dst, plen));
-    hr->addr = *dst;
-    hr->plen = plen;
-    hr->priority = priority;
-}
-
-void
-routes_destroy(struct hmap *host_routes)
-{
-    struct advertise_route_node *hr;
-    HMAP_FOR_EACH_SAFE (hr, hmap_node, host_routes) {
-        hmap_remove(host_routes, &hr->hmap_node);
-        free(hr);
+    struct received_route_node *rr;
+    HMAP_FOR_EACH_SAFE (rr, hmap_node, host_routes) {
+        hmap_remove(host_routes, &rr->hmap_node);
+        free(rr);
     }
     hmap_destroy(host_routes);
 }
 
 struct route_msg_handle_data {
-    struct hmap *routes;
+    const struct hmap *routes;
     struct hmap *learned_routes;
     const char *netns;
 };
@@ -223,8 +212,8 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
 {
     const struct route_data *rd = &msg->rd;
     struct route_msg_handle_data *handle_data = data;
-    struct hmap *routes = handle_data->routes;
-    struct advertise_route_node *ar;
+    const struct hmap *routes = handle_data->routes;
+    struct advertise_route_entry *ar;
     int err;
 
     /* This route is not from us, so we learn it. */
@@ -237,7 +226,7 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
              * Since we just want to learn remote routes we do not need it. */
             return;
         }
-        struct receive_route_node *rr = xzalloc(sizeof *rr);
+        struct received_route_node *rr = xzalloc(sizeof *rr);
         hmap_insert(handle_data->learned_routes, &rr->hmap_node,
                     route_hash(&rd->rta_dst, rd->plen));
         rr->addr = rd->rta_dst;
@@ -246,12 +235,11 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
         return;
     }
 
-    uint32_t hash = route_hash(&rd->rta_dst, rd->plen);
-    HMAP_FOR_EACH_WITH_HASH (ar, hmap_node, hash, routes) {
+    uint32_t arhash = advertise_route_hash(&rd->rta_dst, rd->plen);
+    HMAP_FOR_EACH_WITH_HASH (ar, node, arhash, routes) {
         if (ipv6_addr_equals(&ar->addr, &rd->rta_dst)
                 && ar->plen == rd->plen && ar->priority == rd->rta_priority) {
-            hmap_remove(routes, &ar->hmap_node);
-            free(ar);
+            ar->installed = true;
             return;
         }
     }
@@ -271,7 +259,7 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
 
 void
 re_nl_sync_routes(uint32_t table_id,
-                  struct hmap *routes, struct hmap *learned_routes,
+                  const struct hmap *routes, struct hmap *learned_routes,
                   bool use_netns)
 {
 
@@ -281,6 +269,10 @@ re_nl_sync_routes(uint32_t table_id,
         table_id = RT_TABLE_MAIN;
     }
 
+    struct advertise_route_entry *ar;
+    HMAP_FOR_EACH (ar, node, routes) {
+        ar->installed = false;
+    }
 
     /* Remove routes from the system that are not in the host_routes hmap and
      * remove entries from host_routes hmap that match routes already installed
@@ -295,21 +287,21 @@ re_nl_sync_routes(uint32_t table_id,
 
     /* Add any remaining routes in the host_routes hmap to the system routing
      * table. */
-    struct advertise_route_node *hr;
-    HMAP_FOR_EACH_SAFE (hr, hmap_node, routes) {
-        int err = re_nl_add_route(netns, table_id, &hr->addr,
-                                  hr->plen, hr->priority);
+    HMAP_FOR_EACH (ar, node, routes) {
+        if (ar->installed) {
+            continue;
+        }
+        int err = re_nl_add_route(netns, table_id, &ar->addr,
+                                  ar->plen, ar->priority);
         if (err) {
             char addr_s[INET6_ADDRSTRLEN + 1];
             VLOG_WARN_RL(&rl, "Add route table_id=%"PRIu32" dst=%s plen=%d: %s",
                          table_id,
                          ipv6_string_mapped(
-                             addr_s, &hr->addr) ? addr_s : "(invalid)",
-                         hr->plen,
+                             addr_s, &ar->addr) ? addr_s : "(invalid)",
+                         ar->plen,
                          ovs_strerror(err));
         }
-        hmap_remove(routes, &hr->hmap_node);
-        free(hr);
     }
     free(netns);
 }
