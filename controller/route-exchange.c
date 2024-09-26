@@ -27,6 +27,7 @@
 #include "ha-chassis.h"
 #include "local_data.h"
 #include "route.h"
+#include "route-table-notify.h"
 #include "route-exchange.h"
 #include "route-exchange-netlink.h"
 
@@ -176,7 +177,7 @@ sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
 
 void
 route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
-                   struct route_exchange_ctx_out *r_ctx_out OVS_UNUSED)
+                   struct route_exchange_ctx_out *r_ctx_out)
 {
     struct sset old_maintained_vrfs = SSET_INITIALIZER(&old_maintained_vrfs);
     sset_swap(&_maintained_vrfs, &old_maintained_vrfs);
@@ -209,6 +210,12 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
                                &ad->bound_ports,
                                r_ctx_in->ovnsb_idl_txn,
                                r_ctx_in->sbrec_route_by_datapath);
+
+        struct route_table_watch_request *wr = xzalloc(sizeof(*wr));
+        wr->table_id = ad->key;
+        wr->is_netns = ad->use_netns;
+        hmap_insert(&r_ctx_out->route_table_watches, &wr->node,
+                    route_table_notify_hash_watch(wr->table_id, wr->is_netns));
 
 out:
         received_routes_destroy(&received_routes);
