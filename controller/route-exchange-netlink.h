@@ -51,4 +51,6 @@ void re_nl_sync_routes(uint32_t table_id,
                        struct hmap *learned_routes,
                        bool use_netns);
 
+void re_nl_cleanup_routes(uint32_t table_id, bool use_netns);
+
 #endif /* route-exchange-netlink.h */
