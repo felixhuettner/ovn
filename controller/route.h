@@ -72,7 +72,6 @@ bool route_exchange_relevant_port(const struct sbrec_port_binding *pb);
 uint32_t advertise_route_hash(const struct in6_addr *dst, unsigned int plen);
 void route_run(struct route_ctx_in *,
                struct route_ctx_out *);
-void route_cleanup(void);
-void route_destroy(void);
+void route_cleanup(struct hmap *announce_routes);
 
 #endif /* ROUTE_H */

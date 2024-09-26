@@ -4635,8 +4635,7 @@ static void
 en_route_run(struct engine_node *node, void *data)
 {
     struct ed_type_route *re_data = data;
-    hmap_clear(&re_data->announce_routes);
-
+    route_cleanup(&re_data->announce_routes);
 
     const struct ovsrec_open_vswitch_table *ovs_table =
         EN_OVSDB_GET(engine_get_input("OVS_open_vswitch", node));
@@ -4709,6 +4708,7 @@ en_route_cleanup(void *data)
     struct ed_type_route *re_data = data;
 
     tracked_datapaths_destroy(&re_data->tracked_route_datapaths);
+    route_cleanup(&re_data->announce_routes);
     hmap_destroy(&re_data->announce_routes);
 }
 
@@ -4838,7 +4838,7 @@ en_route_exchange_run(struct engine_node *node, void *data OVS_UNUSED)
     route_exchange_run(&r_ctx_in, &r_ctx_out);
 
     route_table_notify_update_watches(&r_ctx_out.route_table_watches);
-    hmap_clear(&r_ctx_out.route_table_watches);
+    hmap_destroy(&r_ctx_out.route_table_watches);
 
     engine_set_node_state(node, EN_UPDATED);
 }
@@ -4884,10 +4884,8 @@ en_route_table_notify_init(struct engine_node *node OVS_UNUSED,
 }
 
 static void
-en_route_table_notify_cleanup(void *data)
-{
-    free(data);
-}
+en_route_table_notify_cleanup(void *data OVS_UNUSED)
+{}
 
 /* Returns false if the northd internal version stored in SB_Global
  * and ovn-controller internal version don't match.

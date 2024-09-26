@@ -85,13 +85,14 @@ add_watch_entry(uint32_t table_id, bool is_netns)
     we->table_id = table_id;
     we->is_netns = is_netns;
     we->stale = false;
-    const char *netns = NULL;
+    char *netns = NULL;
     if (is_netns) {
         netns = re_nl_get_netns_name(table_id);
     }
     VLOG_DBG("registering new route table watcher for table %d and netns %s",
              table_id, netns);
     we->nln = nln_create(netns, NETLINK_ROUTE, route_table_parse, &rtmsg);
+    free(netns);
 
     we->route_notifier =
         nln_notifier_create(we->nln, RTNLGRP_IPV4_ROUTE,
@@ -143,13 +144,15 @@ route_table_notify_update_watches(struct hmap *route_table_watches)
     }
 
     struct route_table_watch_request *wr;
-    HMAP_FOR_EACH (wr, node, route_table_watches) {
+    HMAP_FOR_EACH_SAFE (wr, node, route_table_watches) {
         we = find_watch_entry(wr->table_id, wr->is_netns);
         if (we) {
             we->stale = false;
         } else {
             add_watch_entry(wr->table_id, wr->is_netns);
         }
+        hmap_remove(route_table_watches, &wr->node);
+        free(wr);
     }
 
     HMAP_FOR_EACH (we, node, &watches) {

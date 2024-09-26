@@ -83,12 +83,23 @@ find_local_crp_by_name(struct ovsdb_idl_index *sbrec_port_binding_by_name,
                           pb);
 }
 
+static void
+advertise_datapath_cleanup(struct advertise_datapath_entry *ad)
+{
+    struct advertise_route_entry *ar;
+    HMAP_FOR_EACH_SAFE(ar, node, &ad->routes) {
+        hmap_remove(&ad->routes, &ar->node);
+        free(ar);
+    }
+    hmap_destroy(&ad->routes);
+    sset_destroy(&ad->bound_ports);
+    free(ad);
+}
+
 void
 route_run(struct route_ctx_in *r_ctx_in,
           struct route_ctx_out *r_ctx_out)
 {
-    hmap_clear(r_ctx_out->announce_routes);
-
     const struct local_datapath *ld;
     HMAP_FOR_EACH (ld, hmap_node, r_ctx_in->local_datapaths) {
         if (!ld->n_peer_ports || ld->is_switch) {
@@ -125,6 +136,7 @@ route_run(struct route_ctx_in *r_ctx_in,
         }
 
         if (!relevant_datapath) {
+            advertise_datapath_cleanup(ad);
             continue;
         }
 
@@ -191,14 +203,17 @@ route_run(struct route_ctx_in *r_ctx_in,
         continue;
 
 cleanup:
-        sset_destroy(&ad->bound_ports);
-        struct advertise_route_entry *ar;
-        HMAP_FOR_EACH_SAFE (ar, node, &ad->routes) {
-            hmap_remove(&ad->routes, &ar->node);
-            free(ar);
-        }
-        hmap_destroy(&ad->routes);
-        free(ad);
+        advertise_datapath_cleanup(ad);
     }
 }
 
+
+void
+route_cleanup(struct hmap *announce_routes)
+{
+    struct advertise_datapath_entry *ad;
+    HMAP_FOR_EACH_SAFE(ad, node, announce_routes) {
+        hmap_remove(announce_routes, &ad->node);
+        advertise_datapath_cleanup(ad);
+    }
+}
