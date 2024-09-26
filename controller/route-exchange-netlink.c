@@ -309,3 +309,53 @@ re_nl_sync_routes(uint32_t table_id,
     }
     free(netns);
 }
+
+static void
+handle_route_msg_delete_all_our_routes(const struct route_table_msg *msg,
+                                       void *data)
+{
+    const struct route_data *rd = &msg->rd;
+    struct route_msg_handle_data *handle_data = data;
+    int err;
+
+    /* This route is not from us, so not interesting. */
+    if (rd->rtm_protocol != RTPROT_OVN) {
+        return;
+    }
+
+    err = re_nl_delete_route(handle_data->netns,
+                             rd->rta_table_id, &rd->rta_dst,
+                             rd->plen, rd->rta_priority);
+    if (err) {
+        char addr_s[INET6_ADDRSTRLEN + 1];
+        VLOG_WARN_RL(&rl, "Delete route table_id=%"PRIu32" dst=%s plen=%d: %s",
+                     rd->rta_table_id,
+                     ipv6_string_mapped(
+                         addr_s, &rd->rta_dst) ? addr_s : "(invalid)",
+                     rd->plen,
+                     ovs_strerror(err));
+    }
+}
+
+void
+re_nl_cleanup_routes(uint32_t table_id, bool use_netns)
+{
+    char * netns = NULL;
+    if (use_netns) {
+        netns = re_nl_get_netns_name(table_id);
+        table_id = RT_TABLE_MAIN;
+    }
+
+    /* Remove routes from the system that are not in the host_routes hmap and
+     * remove entries from host_routes hmap that match routes already installed
+     * in the system. */
+    struct route_msg_handle_data data = {
+        .routes = NULL,
+        .learned_routes = NULL,
+        .netns = netns,
+    };
+    route_table_dump_one_table(netns, table_id,
+                               handle_route_msg_delete_all_our_routes,
+                               &data);
+    free(netns);
+}
