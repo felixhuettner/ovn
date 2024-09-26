@@ -155,7 +155,7 @@ route_table_notify_update_watches(struct hmap *route_table_watches)
         free(wr);
     }
 
-    HMAP_FOR_EACH (we, node, &watches) {
+    HMAP_FOR_EACH_SAFE (we, node, &watches) {
         if (we->stale) {
             remove_watch_entry(we);
         }
