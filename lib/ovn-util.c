@@ -1075,17 +1075,17 @@ get_chassis_external_id_value_bool(const struct smap *external_ids,
 }
 
 bool 
-chassis_find_aa_networks(const struct sbrec_chassis *chassis,
-                         const char* network_name,
-                         struct chassis_aa_network* chassis_aa_network) {
+chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
+                                    const char* network_name,
+                                     struct chassis_aa_network* chassis_aa_network) {
     memset(chassis_aa_network, 0, sizeof *chassis_aa_network);
 
-    const char* aa_ports = smap_get(&chassis->other_config, "ovn-aa-port-mappings");
+    const char* aa_ports = smap_get(&chassis->other_config, "ovn-active-active-mappings");
     bool found = false;
     char *curnet, *nextnet, *curport, *nextport, *start;
 
     // Structure
-    // ovn-aa-port-mappings="<network>|<network>"
+    // ovn-active-active-mappings="<network>|<network>"
     // network="<network_name>;<port>;<port>"
     // port="<mac>,<ip>"
     nextnet = start = xstrdup(aa_ports);
@@ -1105,7 +1105,7 @@ chassis_find_aa_networks(const struct sbrec_chassis *chassis,
             ip = curport;
 
             if (!mac || !ip || !*mac || !*ip) {
-                VLOG_ERR("Invalid format for ovn-aa-port-mappings '%s'",
+                VLOG_ERR("Invalid format for ovn-active-active-mappings '%s'",
                          aa_ports);
                 continue;
             }
@@ -1117,7 +1117,7 @@ chassis_find_aa_networks(const struct sbrec_chassis *chassis,
             init_lport_addresses(address);
 
             if (!eth_addr_from_string(mac, &address->ea)) {
-                VLOG_ERR("Invalid mac address in ovn-aa-port-mappings '%s'",
+                VLOG_ERR("Invalid mac address in ovn-active-active-mappings '%s'",
                          aa_ports);
                 free(address);
                 continue;
@@ -1133,7 +1133,7 @@ chassis_find_aa_networks(const struct sbrec_chassis *chassis,
             error = ip_parse_cidr(ip, &ip4, &plen);
             if (!error) {
                 if (!ip4) {
-                    VLOG_ERR("Invalid ip address in ovn-aa-port-mappings '%s'",
+                    VLOG_ERR("Invalid ip address in ovn-active-active-mappings '%s'",
                              aa_ports);
                     destroy_lport_addresses(address);
                     continue;
@@ -1147,7 +1147,7 @@ chassis_find_aa_networks(const struct sbrec_chassis *chassis,
                 if (!error) {
                     add_ipv6_netaddr(address, ip6, plen);
                 } else {
-                    VLOG_ERR("Invalid ip address in ovn-aa-port-mappings '%s'",
+                    VLOG_ERR("Invalid ip address in ovn-active-active-mappings '%s'",
                              aa_ports);
                     destroy_lport_addresses(address);
                     free(error);

@@ -2614,7 +2614,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
             }
 
             struct chassis_aa_network networks;
-            if (!chassis_find_aa_networks(chassis, network_name, &networks)) {
+            if (!chassis_find_active_active_networks(chassis, network_name, &networks)) {
                 static struct vlog_rate_limit rl
                     = VLOG_RATE_LIMIT_INIT(5, 1);
                 VLOG_WARN_RL(&rl, "chassis %s does not contain network"
