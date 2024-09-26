@@ -252,6 +252,12 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
     }
 }
 
+char *
+re_nl_get_netns_name(uint32_t table_id)
+{
+    return xasprintf("ovnns%d", table_id);
+}
+
 void
 re_nl_sync_routes(uint32_t table_id,
                   const struct hmap *routes, struct hmap *learned_routes,
@@ -260,7 +266,7 @@ re_nl_sync_routes(uint32_t table_id,
 
     char * netns = NULL;
     if (use_netns) {
-        netns = xasprintf("ovnns%d", table_id);
+        netns = re_nl_get_netns_name(table_id);
         table_id = RT_TABLE_MAIN;
     }
 

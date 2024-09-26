@@ -34,6 +34,8 @@ struct re_nl_received_route_node {
     struct in6_addr nexthop;
 };
 
+char * re_nl_get_netns_name(uint32_t table_id);
+
 int re_nl_create_vrf(const char *ifname, uint32_t table_id);
 int re_nl_delete_vrf(const char *ifname);
 
