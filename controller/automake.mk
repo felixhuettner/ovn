@@ -52,7 +52,9 @@ controller_ovn_controller_SOURCES = \
 	controller/ct-zone.c \
 	controller/route-exchange.h \
 	controller/route.h \
-	controller/route.c
+	controller/route.c \
+	controller/route-table-notify.h \
+	controller/route-table-notify.c
 
 if HAVE_NETLINK
 controller_ovn_controller_SOURCES += \

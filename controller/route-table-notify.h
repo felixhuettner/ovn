@@ -14,27 +14,26 @@
  * limitations under the License.
  */
 
-#ifndef ROUTE_EXCHANGE_H
-#define ROUTE_EXCHANGE_H 1
+#ifndef ROUTE_TABLE_NOTIFY_H
+#define ROUTE_TABLE_NOTIFY_H 1
 
 #include <stdbool.h>
 #include "openvswitch/hmap.h"
 
-struct route_exchange_ctx_in {
-    struct ovsdb_idl_txn *ovnsb_idl_txn;
-    struct ovsdb_idl_index *sbrec_route_by_datapath;
-    /* Contains struct advertise_datapath_entry */
-    struct hmap *announce_routes;
+struct route_table_watch_request {
+    struct hmap_node node;
+    uint32_t table_id;
+    bool is_netns;
 };
 
-struct route_exchange_ctx_out {
-    /* contains route_table_watch */
-    struct hmap route_table_watches;
-};
+uint32_t route_table_notify_hash_watch(uint32_t table_id, bool is_netns);
 
-void route_exchange_run(struct route_exchange_ctx_in *,
-                        struct route_exchange_ctx_out *);
-void route_exchange_cleanup(void);
-void route_exchange_destroy(void);
+/* returns true if any route table has changed enough that we need to learn
+ * new routes. */
+bool route_table_notify_run(void);
+void route_table_notify_wait(void);
+/* updates the list of route table watches that are currently active.
+ * hmap should contain struct route_table_watch_request */
+void route_table_notify_update_watches(struct hmap *route_table_watches);
 
-#endif /* ROUTE_EXCHANGE_H */
+#endif /* ROUTE_TABLE_NOTIFY_H */

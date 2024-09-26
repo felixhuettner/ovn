@@ -22,12 +22,16 @@
 #include "openvswitch/hmap.h"
 #include <netinet/in.h>
 
+#define RTPROT_OVN 84
+
 struct received_route_node {
     struct hmap_node hmap_node;
     struct in6_addr addr;
     unsigned int plen;
     struct in6_addr nexthop;
 };
+
+char * re_nl_get_netns_name(uint32_t table_id);
 
 int re_nl_create_vrf(const char *ifname, uint32_t table_id);
 int re_nl_delete_vrf(const char *ifname);
