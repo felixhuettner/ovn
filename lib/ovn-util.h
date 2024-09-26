@@ -358,9 +358,9 @@ struct chassis_aa_network {
     size_t n_addresses;
 };
 
-bool chassis_find_aa_networks(const struct sbrec_chassis *,
-                              const char* network_name,
-                              struct chassis_aa_network* chassis_aa_network);
+bool chassis_find_active_active_networks(const struct sbrec_chassis *,
+                                         const char* network_name,
+                                         struct chassis_aa_network* chassis_aa_network);
 
 const char *
 get_chassis_external_id_value(const struct smap *,
