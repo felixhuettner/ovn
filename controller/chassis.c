@@ -560,6 +560,12 @@ chassis_other_config_changed(const struct ovs_chassis_cfg *ovs_cfg,
         return true;
     }
 
+    const char *chassis_active_active_mapping =
+      get_chassis_active_active_mappings(&chassis_rec->other_config, chassis_rec->name);
+    if (strcmp(ovs_cfg->active_active_mappings, chassis_active_active_mapping)) {
+        return true;
+    }
+
     return false;
 }
 
