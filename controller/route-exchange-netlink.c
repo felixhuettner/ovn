@@ -219,17 +219,19 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
         if (prefix_is_link_local(&rd->rta_dst, rd->plen)) {
             return;
         }
-        if (IN6_IS_ADDR_UNSPECIFIED(&rd->rta_gw)) {
-            /* This is most likely an address on the local link.
-             * Since we just want to learn remote routes we do not need it. */
-            return;
+        for (int i = 0; i < rd->n_nexthops; i++) {
+            if (IN6_IS_ADDR_UNSPECIFIED(&rd->nexthops[i].rta_gw)) {
+                /* This is most likely an address on the local link.
+                 * Since we just want to learn remote routes we do not need it. */
+                return;
+            }
+            struct received_route_node *rr = xzalloc(sizeof *rr);
+            hmap_insert(handle_data->learned_routes, &rr->hmap_node,
+                        route_hash(&rd->rta_dst, rd->plen));
+            rr->addr = rd->rta_dst;
+            rr->plen = rd->plen;
+            rr->nexthop = rd->nexthops[i].rta_gw;
         }
-        struct received_route_node *rr = xzalloc(sizeof *rr);
-        hmap_insert(handle_data->learned_routes, &rr->hmap_node,
-                    route_hash(&rd->rta_dst, rd->plen));
-        rr->addr = rd->rta_dst;
-        rr->plen = rd->plen;
-        rr->nexthop = rd->rta_gw;
         return;
     }
 
