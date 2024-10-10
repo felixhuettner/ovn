@@ -2650,6 +2650,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
                 lsp->aa_chassis_name = xstrdup(chassis->name);
                 lrp->aa_chassis_index = j;
                 lsp->aa_chassis_index = j;
+                lrp->aa_ifindex = networks.ifindexes[j];
 
                 if (nbsp_rpr) {
                     char *lsp_rpr_name = xasprintf("%s-%s-%"PRIuSIZE,
@@ -2664,6 +2665,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
             }
             free(networks.network_name);
             free(networks.addresses);
+            free(networks.ifindexes);
         }
     }
 
@@ -4398,6 +4400,14 @@ sync_pb_for_lrp(struct ovn_port *op,
         }
         if (smap_get_bool(&op->od->nbr->options, "dynamic-routing", false)) {
             smap_add(&new, "dynamic-routing", "true");
+        }
+        uint32_t ifindex = op->aa_ifindex;
+        if (!ifindex && op->primary_port) {
+            ifindex = op->primary_port->aa_ifindex;
+        }
+        if (ifindex) {
+            smap_add_nocopy(&new, xstrdup("dynamic-routing-ifindex"),
+                            xasprintf("%u", ifindex));
         }
     }
 

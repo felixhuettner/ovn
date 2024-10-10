@@ -29,6 +29,7 @@ struct received_route_node {
     struct in6_addr addr;
     unsigned int plen;
     struct in6_addr nexthop;
+    unsigned int ifindex;
 };
 
 char * re_nl_get_netns_name(uint32_t table_id);

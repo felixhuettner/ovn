@@ -31,6 +31,7 @@
 #include "route-table-notify.h"
 #include "route-exchange.h"
 #include "route-exchange-netlink.h"
+#include "simap.h"
 
 
 VLOG_DEFINE_THIS_MODULE(route_exchange);
@@ -153,7 +154,7 @@ route_erase_entry(struct route_entry *route_e)
 static void
 sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
                        const struct hmap *learned_routes,
-                       const struct sset *bound_ports,
+                       const struct simap *bound_ports,
                        struct ovsdb_idl_txn *ovnsb_idl_txn,
                        struct ovsdb_idl_index *sbrec_route_by_datapath)
 {
@@ -169,7 +170,7 @@ sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
             continue;
         }
         /* If the port is not local we don't care about it, someone else will */
-        if (!sset_contains(bound_ports, sb_route->logical_port)) {
+        if (!simap_contains(bound_ports, sb_route->logical_port)) {
             continue;
         }
         route_e = route_alloc_entry(&sync_routes,
@@ -187,16 +188,22 @@ sb_sync_learned_routes(const struct sbrec_datapath_binding *datapath,
         char *ip_prefix = normalize_v46_prefix(&learned_route->addr, learned_route->plen);
         char *nexthop = normalize_v46(&learned_route->nexthop);
 
-        const char *logical_port;
-        SSET_FOR_EACH(logical_port, bound_ports) {
+        struct simap_node *port_node;
+        SIMAP_FOR_EACH (port_node, bound_ports) {
+            /* The user specified an ifindex, but we learned it on a different
+             * port. */
+            if (port_node->data && port_node->data != learned_route->ifindex) {
+                continue;
+            }
             route_e = route_lookup_or_add(&sync_routes,
                 datapath,
-                logical_port, ip_prefix, nexthop);
+                port_node->name, ip_prefix, nexthop);
             route_e->stale = false;
             if (!route_e->sb_route) {
                 sb_route = sbrec_route_insert(ovnsb_idl_txn);
                 sbrec_route_set_datapath(sb_route, datapath);
-                sbrec_route_set_logical_port(sb_route, logical_port);
+                sbrec_route_set_logical_port(sb_route,
+                                             port_node->name);
                 sbrec_route_set_ip_prefix(sb_route, ip_prefix);
                 sbrec_route_set_nexthop(sb_route, nexthop);
                 sbrec_route_set_type(sb_route, "receive");
