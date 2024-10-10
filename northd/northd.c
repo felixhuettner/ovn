@@ -11715,6 +11715,9 @@ struct ecmp_groups_node {
     uint32_t route_table_id;
     uint16_t route_count;
     struct ovs_list route_list; /* Contains ecmp_route_list_node */
+    /* If this is set the route should only apply to chassis where the port
+     * is resident. It will also receive a higher priority*/
+    struct sset ports_resident;
     bool has_different_chassis;
 };
 
@@ -11771,6 +11774,7 @@ ecmp_groups_add(struct hmap *ecmp_groups,
     eg->route_table_id = route->route_table_id;
     eg->has_different_chassis = false;
     ovs_list_init(&eg->route_list);
+    sset_init(&eg->ports_resident);
     ecmp_groups_add_route(eg, route);
 
     return eg;
@@ -11801,6 +11805,7 @@ ecmp_groups_destroy(struct hmap *ecmp_groups)
             ovs_list_remove(&er->list_node);
             free(er);
         }
+        sset_destroy(&eg->ports_resident);
         hmap_remove(ecmp_groups, &eg->hmap_node);
         free(eg);
     }
@@ -11810,15 +11815,19 @@ ecmp_groups_destroy(struct hmap *ecmp_groups)
 struct unique_routes_node {
     struct hmap_node hmap_node;
     const struct parsed_route *route;
+    /* If this is set the route should only apply to chassis where the port
+     * is resident. It will also receive a higher priority*/
+    const char *port_resident;
 };
 
-static void
+static struct unique_routes_node *
 unique_routes_add(struct hmap *unique_routes,
                   const struct parsed_route *route)
 {
-    struct unique_routes_node *ur = xmalloc(sizeof *ur);
+    struct unique_routes_node *ur = xzalloc(sizeof *ur);
     ur->route = route;
     hmap_insert(unique_routes, &ur->hmap_node, route->hash);
+    return ur;
 }
 
 /* Remove the unique_routes_node from the hmap, and return the parsed_route
@@ -12165,7 +12174,6 @@ add_route(struct lflow_table *lflows, struct ovn_datapath *od,
 
 static void
 build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
-                      const struct sset *bfd_ports,
                       struct ecmp_groups_node *eg, struct lflow_ref *lflow_ref)
 
 {
@@ -12178,6 +12186,21 @@ build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
     int ofs = route_source_to_offset(eg->source);
     build_route_match(NULL, eg->route_table_id, prefix_s, eg->plen,
                       eg->is_src_route, is_ipv4, &route_match, &priority, ofs);
+
+    if (sset_count(&eg->ports_resident) > 0) {
+        priority += ROUTE_PRIO_OFFSET_SPECIFIC_CHASSIS;
+        ds_put_format(&route_match, " && (");
+        bool first = true;
+        const char *port;
+        SSET_FOR_EACH(port, &eg->ports_resident) {
+            if (!first) {
+                ds_put_format(&route_match, "||");
+            }
+            first = false;
+            ds_put_format(&route_match, " is_chassis_resident(\"%s\") ", port);
+        }
+        ds_put_format(&route_match, ")");
+    }
 
     struct ds actions = DS_EMPTY_INITIALIZER;
     ds_put_format(&actions, "ip.ttl--; flags.loopback = 1; %s = %"PRIu16
@@ -12237,14 +12260,6 @@ build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
                                 ds_cstr(&match), ds_cstr(&actions),
                                 route->source_hint, lflow_ref);
 
-        if (eg->has_different_chassis && route->out_port->cr_port) {
-            add_route(lflows, od, route->out_port, route->lrp_addr_s,
-                      prefix_s, route->plen, route->nexthop, route->is_src_route,
-                      route->route_table_id, bfd_ports,
-                      route->source_hint,
-                      route->is_discard_route, route->source,
-                      lflow_ref, route->out_port->cr_port->key);
-        }
     }
     free(prefix_s);
     sset_destroy(&visited_ports);
@@ -12257,7 +12272,8 @@ static void
 build_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
                         const struct parsed_route *route,
                         const struct sset *bfd_ports,
-                        struct lflow_ref *lflow_ref)
+                        struct lflow_ref *lflow_ref,
+                        const char *port_resident)
 {
     char *prefix_s = build_route_prefix_s(&route->prefix, route->plen);
     add_route(lflows, route->is_discard_route ? od : route->out_port->od, 
@@ -12265,7 +12281,8 @@ build_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
               route->plen, route->nexthop, route->is_src_route,
               route->route_table_id, bfd_ports,
               route->source_hint,
-              route->is_discard_route, route->source, lflow_ref, NULL);
+              route->is_discard_route, route->source, lflow_ref,
+              port_resident);
 
     free(prefix_s);
 }
@@ -14042,15 +14059,66 @@ build_route_flows_for_lrouter(
             }
         }
     }
+
+    /* We now duplicate some routes based on ecmp groups. The goal here is to
+     * prioritize taking some route of a ecmp route if we are already on the
+     * respective chassis. This saves us potentially forwarding traffic between
+     * chassis for no reason. */
+    HMAP_FOR_EACH_SAFE (group, hmap_node, &ecmp_groups) {
+        if (!group->has_different_chassis) {
+            continue;
+        }
+        struct simap chassis_count = SIMAP_INITIALIZER(&chassis_count);
+        struct ecmp_route_list_node *er;
+        LIST_FOR_EACH(er, list_node, &group->route_list) {
+            if (er->route->is_discard_route ||
+                !er->route->out_port->is_active_active) {
+                continue;
+            }
+            simap_increase(&chassis_count,
+                           er->route->out_port->aa_chassis_name, 1);
+        }
+
+
+        struct simap_node *chassis_node;
+        SIMAP_FOR_EACH (chassis_node, &chassis_count) {
+            ovs_assert(chassis_node->data != 0);
+            struct ecmp_groups_node *found_group = NULL;
+            LIST_FOR_EACH(er, list_node, &group->route_list) {
+                if (er->route->is_discard_route ||
+                    !er->route->out_port->is_active_active ||
+                    strcmp(chassis_node->name, er->route->out_port->aa_chassis_name)) {
+                    continue;
+                }
+                const char *port_name = er->route->out_port->cr_port->key;
+                if (chassis_node->data == 1) {
+                    struct unique_routes_node *ur =
+                        unique_routes_add(&unique_routes, er->route);
+                    ur->port_resident = port_name;
+                } else {
+                    if (!found_group) {
+                        found_group = ecmp_groups_add(&ecmp_groups, er->route);
+                    } else {
+                        ecmp_groups_add_route(found_group, er->route);
+                    }
+                    sset_add(&found_group->ports_resident, port_name);
+                }
+            }
+        }
+
+        simap_destroy(&chassis_count);
+    }
+
+    /* And now really add the routing flows */
     HMAP_FOR_EACH (group, hmap_node, &ecmp_groups) {
         /* add a flow in IP_ROUTING, and one flow for each member in
          * IP_ROUTING_ECMP. */
-        build_ecmp_route_flow(lflows, od, bfd_ports, group, lflow_ref);
+        build_ecmp_route_flow(lflows, od, group, lflow_ref);
     }
     const struct unique_routes_node *ur;
     HMAP_FOR_EACH (ur, hmap_node, &unique_routes) {
         build_route_flow(lflows, od, ur->route,
-                                bfd_ports, lflow_ref);
+                         bfd_ports, lflow_ref, ur->port_resident);
     }
     ecmp_groups_destroy(&ecmp_groups);
     unique_routes_destroy(&unique_routes);
