@@ -354,8 +354,9 @@ char *lr_lb_address_set_ref(uint32_t lr_tunnel_key, int addr_family);
 
 struct chassis_aa_network {
     char* network_name;
-    struct lport_addresses* addresses;
     size_t n_addresses;
+    struct lport_addresses* addresses;
+    uint32_t* ifindexes;
 };
 
 bool chassis_find_active_active_networks(const struct sbrec_chassis *,

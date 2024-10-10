@@ -1087,7 +1087,8 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
     // Structure
     // ovn-active-active-mappings="<network>|<network>"
     // network="<network_name>;<port>;<port>"
-    // port="<mac>,<ip>"
+    // port="<mac>,<ip>,<ifindex>"
+    // ifindex is optional
     nextnet = start = xstrdup(aa_ports);
     while ((curnet = strsep(&nextnet, "|")) && *curnet) {
         nextport = curnet;
@@ -1099,10 +1100,11 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
         chassis_aa_network->network_name = xstrdup(network);
         chassis_aa_network->n_addresses = 0;
         while ((curport = strsep(&nextport, ";")) && *curport) {
-            char *mac, *ip;
+            char *mac, *ip, *ifindex;
 
             mac = strsep(&curport, ",");
-            ip = curport;
+            ip = strsep(&curport, ",");
+            ifindex = curport;
 
             if (!mac || !ip || !*mac || !*ip) {
                 VLOG_ERR("Invalid format for ovn-active-active-mappings '%s'",
@@ -1154,6 +1156,15 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
                     continue;
                 }
             }
+
+            chassis_aa_network->ifindexes = xrealloc(chassis_aa_network->ifindexes,
+                (chassis_aa_network->n_addresses + 1) * sizeof *chassis_aa_network->ifindexes);
+            uint32_t ifindex_i = 0;
+            if (ifindex) {
+                ifindex_i = atoi(ifindex);
+            }
+            chassis_aa_network->ifindexes[chassis_aa_network->n_addresses] = ifindex_i;
+
             chassis_aa_network->n_addresses++;
         }
     }

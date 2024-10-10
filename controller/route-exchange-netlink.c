@@ -231,6 +231,7 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
             rr->addr = rd->rta_dst;
             rr->plen = rd->plen;
             rr->nexthop = rd->nexthops[i].rta_gw;
+            rr->ifindex = rd->nexthops[i].ifindex;
         }
         return;
     }

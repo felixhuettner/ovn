@@ -675,6 +675,7 @@ struct ovn_port {
     char *aa_mac; // Only set on the lrp side
     char *aa_chassis_name;
     size_t aa_chassis_index;
+    uint32_t aa_ifindex; // Only set on the lrp side, 0 if not set
 
     /* Reference of lflows generated for this ovn_port.
      *
