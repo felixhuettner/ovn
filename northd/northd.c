@@ -11539,11 +11539,12 @@ parsed_routes_add_static(const struct ovn_datapath *od,
                   struct hmap *bfd_active_connections)
 {
     /* Verify that the next hop is an IP address with an all-ones mask. */
-    struct in6_addr *nexthop = xmalloc(sizeof(*nexthop));
+    struct in6_addr *nexthop = NULL;
     unsigned int plen;
     bool is_discard_route = !strcmp(route->nexthop, "discard");
     bool valid_nexthop = route->nexthop[0] && !is_discard_route;
     if (valid_nexthop) {
+        nexthop = xmalloc(sizeof(*nexthop));
         if (!ip46_parse_cidr(route->nexthop, nexthop, &plen)) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 1);
             VLOG_WARN_RL(&rl, "bad 'nexthop' %s in static route "
