@@ -19,6 +19,7 @@
 
 #include <stdbool.h>
 #include "openvswitch/hmap.h"
+#include "hash.h"
 
 struct route_table_watch_request {
     struct hmap_node node;
@@ -26,7 +27,12 @@ struct route_table_watch_request {
     bool is_netns;
 };
 
-uint32_t route_table_notify_hash_watch(uint32_t table_id, bool is_netns);
+static inline uint32_t
+route_table_notify_hash_watch(uint32_t table_id, bool is_netns)
+{
+    uint32_t hash = hash_add(0, table_id);
+    return hash_boolean(is_netns, hash);
+}
 
 /* returns true if any route table has changed enough that we need to learn
  * new routes. */

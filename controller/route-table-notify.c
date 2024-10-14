@@ -46,13 +46,6 @@ static struct hmap watches = HMAP_INITIALIZER(&watches);
 static bool any_route_table_changed = false;
 static struct route_table_msg rtmsg;
 
-uint32_t
-route_table_notify_hash_watch(uint32_t table_id, bool is_netns)
-{
-    uint32_t hash = hash_add(0, table_id);
-    return hash_boolean(is_netns, hash);
-}
-
 static struct route_table_watch_entry*
 find_watch_entry(uint32_t table_id, bool is_netns)
 {
