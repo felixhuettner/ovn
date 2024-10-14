@@ -158,8 +158,9 @@ route_run(struct route_ctx_in *r_ctx_in,
 
         if (ad->maintain_vrf && ad->use_netns) {
             VLOG_WARN_RL(&rl,
-                         "For Datapath %ld both maintain-vrf and use-netns are set, "
-                         "this will never work", ld->datapath->tunnel_key);
+                         "For Datapath %"PRIu64" both maintain-vrf and "
+                         "use-netns are set, this will never work",
+                         ld->datapath->tunnel_key);
             goto cleanup;
         }
 
