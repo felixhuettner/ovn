@@ -20,7 +20,6 @@
 #include <inttypes.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
-#include <netinet/in.h>
 
 #include "netlink-socket.h"
 #include "netlink.h"
@@ -221,7 +220,7 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
             return;
         }
         for (int i = 0; i < rd->n_nexthops; i++) {
-            if (IN6_IS_ADDR_UNSPECIFIED(&rd->nexthops[i].rta_gw)) {
+            if (ipv6_is_zero(&rd->nexthops[i].rta_gw)) {
                 /* This is most likely an address on the local link.
                  * Since we just want to learn remote routes we do not need it. */
                 return;
