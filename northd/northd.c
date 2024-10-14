@@ -11506,7 +11506,9 @@ parsed_route_add(const struct ovn_datapath *od,
     new_pr->od = od;
     new_pr->ecmp_symmetric_reply = ecmp_symmetric_reply;
     new_pr->is_discard_route = is_discard_route;
-    new_pr->lrp_addr_s = xstrdup(lrp_addr_s);
+    if (!is_discard_route) {
+        new_pr->lrp_addr_s = xstrdup(lrp_addr_s);
+    }
     new_pr->out_port = out_port;
     new_pr->source = source;
     new_pr->source_hint = source_hint;
