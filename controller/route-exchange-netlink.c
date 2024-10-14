@@ -20,6 +20,7 @@
 #include <inttypes.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
+#include <netinet/in.h>
 
 #include "netlink-socket.h"
 #include "netlink.h"
