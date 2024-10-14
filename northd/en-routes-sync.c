@@ -54,6 +54,29 @@ routes_sync_destroy(struct routes_sync_data *data)
     hmap_destroy(&data->parsed_routes);
 }
 
+bool
+routes_sync_northd_change_handler(struct engine_node *node,
+                                  void *data OVS_UNUSED)
+{
+    struct northd_data *northd_data = engine_get_input_data("northd", node);
+    if (!northd_has_tracked_data(&northd_data->trk_data)) {
+        return false;
+    }
+
+    /* This node uses the below data from the en_northd engine node.
+     * See (lr_stateful_get_input_data())
+     *   1. northd_data->lr_datapaths
+     *   2. northd_data->lr_ports
+     *      This data gets updated when a logical router or logical router port
+     *      is created or deleted.
+     *      Northd engine node presently falls back to full recompute when
+     *      this happens and so does this node.
+     *      Note: When we add I-P to the created/deleted logical routers or
+     *      logical router ports, we need to revisit this handler.
+     */
+    return true;
+}
+
 void
 *en_routes_sync_init(struct engine_node *node OVS_UNUSED,
                      struct engine_arg *arg OVS_UNUSED)
