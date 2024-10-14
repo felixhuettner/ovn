@@ -303,13 +303,20 @@ BUILD_ASSERT_DECL(ACL_OBS_STAGE_MAX < (1 << 2));
 /*
  * Route offsets implement logic to prioritize traffic for routes with
  * same ip_prefix values:
- *  -  connected route overrides static one;
- *  -  static route overrides src-ip route. */
-#define ROUTE_PRIO_OFFSET_MULTIPLIER 4
+ *  1. (highest priority) connected routes
+ *  2. static routes
+ *  3. routes learned from the outside via ovn-controller (e.g. bgp)
+ *  4. (lowest priority) src-ip routes
+ *
+ * When having ecmp routes with multiple different output ports on different
+ * chassis we prioritize being on the same chassis.
+ * However longer prefix matches are more important than being local.
+ *  */
+#define ROUTE_PRIO_OFFSET_MULTIPLIER 8
 #define ROUTE_PRIO_OFFSET_LEARNED 1
 #define ROUTE_PRIO_OFFSET_STATIC 2
 #define ROUTE_PRIO_OFFSET_CONNECTED 3
-#define ROUTE_PRIO_OFFSET_SPECIFIC_CHASSIS 512
+#define ROUTE_PRIO_OFFSET_ADD_SPECIFIC_CHASSIS 4
 
 /* Returns the type of the datapath to which a flow with the given 'stage' may
  * be added. */
@@ -12127,7 +12134,7 @@ add_route(struct lflow_table *lflows, struct ovn_datapath *od,
                       is_ipv4, &match, &priority, ofs);
 
     if (port_resident) {
-        priority += ROUTE_PRIO_OFFSET_SPECIFIC_CHASSIS;
+        priority += ROUTE_PRIO_OFFSET_ADD_SPECIFIC_CHASSIS;
         ds_put_format(&match, " && is_chassis_resident(\"%s\")", port_resident);
     }
 
@@ -12190,7 +12197,7 @@ build_ecmp_route_flow(struct lflow_table *lflows, struct ovn_datapath *od,
                       eg->is_src_route, is_ipv4, &route_match, &priority, ofs);
 
     if (sset_count(&eg->ports_resident) > 0) {
-        priority += ROUTE_PRIO_OFFSET_SPECIFIC_CHASSIS;
+        priority += ROUTE_PRIO_OFFSET_ADD_SPECIFIC_CHASSIS;
         ds_put_format(&route_match, " && (");
         bool first = true;
         const char *port;
