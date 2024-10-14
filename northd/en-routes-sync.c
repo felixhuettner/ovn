@@ -36,12 +36,14 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
                   const struct hmap *parsed_routes,
                   const struct hmap *lr_ports,
                   const struct ovn_datapaths *lr_datapaths,
-                  struct hmap *parsed_routes_out);
+                  struct hmap *parsed_routes_out,
+                  struct routes_sync_tracked_data *trk_data);
 
 static void
 routes_sync_init(struct routes_sync_data *data)
 {
     hmap_init(&data->parsed_routes);
+    uuidset_init(&data->trk_data.nb_lr_stateful);
 }
 
 static void
@@ -52,6 +54,7 @@ routes_sync_destroy(struct routes_sync_data *data)
         parsed_route_free(r);
     }
     hmap_destroy(&data->parsed_routes);
+    uuidset_destroy(&data->trk_data.nb_lr_stateful);
 }
 
 bool
@@ -77,6 +80,30 @@ routes_sync_northd_change_handler(struct engine_node *node,
     return true;
 }
 
+bool
+routes_sync_lr_stateful_change_handler(struct engine_node *node,
+                                       void *data_)
+{
+    /* We only actually use lr_stateful data if we expose individual host
+     * routes. In this case we for now just recompute.
+     * */
+    struct ed_type_lr_stateful *lr_stateful_data =
+        engine_get_input_data("lr_stateful", node);
+    struct routes_sync_data *data = data_;
+
+    struct hmapx_node *hmapx_node;
+    const struct lr_stateful_record *lr_stateful_rec;
+    HMAPX_FOR_EACH(hmapx_node, &lr_stateful_data->trk_data.crupdated) {
+        lr_stateful_rec = hmapx_node->data;
+        if (uuidset_contains(&data->trk_data.nb_lr_stateful,
+                             &lr_stateful_rec->nbr_uuid)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void
 *en_routes_sync_init(struct engine_node *node OVS_UNUSED,
                      struct engine_arg *arg OVS_UNUSED)
@@ -90,6 +117,13 @@ void
 en_routes_sync_cleanup(void *data)
 {
     routes_sync_destroy(data);
+}
+
+void
+en_routes_sync_clear_tracked_data(void *data_)
+{
+    struct routes_sync_data *data = data_;
+    uuidset_clear(&data->trk_data.nb_lr_stateful);
 }
 
 void
@@ -115,7 +149,8 @@ en_routes_sync_run(struct engine_node *node, void *data)
                       &routes_data->parsed_routes,
                       &northd_data->lr_ports,
                       &northd_data->lr_datapaths,
-                      &routes_sync_data->parsed_routes);
+                      &routes_sync_data->parsed_routes,
+                      &routes_sync_data->trk_data);
 
     stopwatch_stop(ROUTES_SYNC_RUN_STOPWATCH_NAME, time_msec());
     engine_set_node_state(node, EN_UPDATED);
@@ -351,7 +386,8 @@ static void
 publish_host_routes(struct ovsdb_idl_txn *ovnsb_txn,
                     struct hmap *route_map,
                     const struct lr_stateful_table *lr_stateful_table,
-                    const struct parsed_route *route)
+                    const struct parsed_route *route,
+                    struct routes_sync_tracked_data *trk_data)
 {
     struct ovn_port *port;
     HMAP_FOR_EACH(port, dp_node, &route->out_port->peer->od->ports) {
@@ -365,6 +401,8 @@ publish_host_routes(struct ovsdb_idl_txn *ovnsb_txn,
             const struct lr_stateful_record *lr_stateful_rec;
             lr_stateful_rec = lr_stateful_table_find_by_index(lr_stateful_table,
                                                               port->peer->od->index);
+            uuidset_insert(&trk_data->nb_lr_stateful,
+                           &lr_stateful_rec->nbr_uuid);
             struct ovn_port_routable_addresses addrs = get_op_addresses(
                 port->peer, lr_stateful_rec, false);
             for (int i = 0; i < addrs.n_addrs; i++) {
@@ -400,7 +438,8 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
                   const struct hmap *parsed_routes,
                   const struct hmap *lr_ports,
                   const struct ovn_datapaths *lr_datapaths,
-                  struct hmap *parsed_routes_out)
+                  struct hmap *parsed_routes_out,
+                  struct routes_sync_tracked_data *trk_data)
 {
     if (!ovnsb_txn) {
         return;
@@ -449,7 +488,7 @@ routes_table_sync(struct ovsdb_idl_txn *ovnsb_txn,
 
         if (smap_get_bool(&route->out_port->nbrp->options, "dynamic-routing-connected-as-host-routes", false)) {
             publish_host_routes(ovnsb_txn, &sync_routes,
-                                lr_stateful_table, route);
+                                lr_stateful_table, route, trk_data);
         } else {
             char *ip_prefix = normalize_v46_prefix(&route->prefix, route->plen);
             route_sync_to_sb(ovnsb_txn, &sync_routes,

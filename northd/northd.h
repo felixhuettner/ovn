@@ -189,10 +189,6 @@ struct routes_data {
     struct hmap bfd_active_connections;
 };
 
-struct routes_sync_data {
-    struct hmap parsed_routes;
-};
-
 struct route_policies_data {
     struct hmap route_policies;
     struct hmap bfd_active_connections;
