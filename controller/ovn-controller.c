@@ -4749,6 +4749,28 @@ route_runtime_data_handler(struct engine_node *node, void *data)
     return true;
 }
 
+static bool
+route_sb_port_binding_data_handler(struct engine_node *node, void *data)
+{
+    struct ed_type_route *re_data = data;
+    const struct sbrec_port_binding_table *pb_table =
+        EN_OVSDB_GET(engine_get_input("SB_port_binding", node));
+
+    const struct sbrec_port_binding *sbrec_pb;
+    SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (sbrec_pb, pb_table) {
+        struct tracked_datapath *re_t_dp =
+            tracked_datapath_find(&re_data->tracked_route_datapaths, sbrec_pb->datapath);
+
+        if (re_t_dp) {
+            /* Until we get I-P support for route exchange we need to request
+             * recompute. */
+            return false;
+        }
+
+    }
+    return true;
+}
+
 static void
 en_route_exchange_run(struct engine_node *node, void *data OVS_UNUSED)
 {
@@ -5137,7 +5159,8 @@ main(int argc, char *argv[])
 
     engine_add_input(&en_route, &en_ovs_open_vswitch, NULL);
     engine_add_input(&en_route, &en_sb_chassis, NULL);
-    engine_add_input(&en_route, &en_sb_port_binding, NULL);
+    engine_add_input(&en_route, &en_sb_port_binding,
+                     route_sb_port_binding_data_handler);
     engine_add_input(&en_route, &en_runtime_data,
                      route_runtime_data_handler);
     engine_add_input(&en_route, &en_sb_route,
