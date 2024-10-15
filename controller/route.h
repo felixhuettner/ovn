@@ -32,11 +32,9 @@ struct sset;
 struct route_ctx_in {
     struct ovsdb_idl_txn *ovnsb_idl_txn;
     struct ovsdb_idl_index *sbrec_port_binding_by_name;
-    const struct sbrec_load_balancer_table *lb_table;
     const struct sbrec_chassis *chassis;
     const struct sset *active_tunnels;
     struct hmap *local_datapaths;
-    struct hmap *local_lbs;
     const struct sset *local_lports;
     struct ovsdb_idl_index *sbrec_route_by_datapath;
 };

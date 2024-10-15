@@ -4657,11 +4657,6 @@ en_route_run(struct engine_node *node, void *data)
     struct ed_type_runtime_data *rt_data =
         engine_get_input_data("runtime_data", node);
 
-    const struct sbrec_load_balancer_table *lb_table =
-        EN_OVSDB_GET(engine_get_input("SB_load_balancer", node));
-    struct ed_type_lb_data *lb_data =
-        engine_get_input_data("lb_data", node);
-
     struct ovsdb_idl_index *sbrec_route_by_datapath =
         engine_ovsdb_node_get_index(
             engine_get_input("SB_route", node), "datapath");
@@ -4669,11 +4664,9 @@ en_route_run(struct engine_node *node, void *data)
     struct route_ctx_in r_ctx_in = {
         .ovnsb_idl_txn = engine_get_context()->ovnsb_idl_txn,
         .sbrec_port_binding_by_name = sbrec_port_binding_by_name,
-        .lb_table = lb_table,
         .chassis = chassis,
         .active_tunnels = &rt_data->active_tunnels,
         .local_datapaths = &rt_data->local_datapaths,
-        .local_lbs = &lb_data->local_lbs,
         .local_lports = &rt_data->local_lports,
         .sbrec_route_by_datapath = sbrec_route_by_datapath,
     };
@@ -4682,7 +4675,6 @@ en_route_run(struct engine_node *node, void *data)
         .tracked_re_datapaths = &re_data->tracked_route_datapaths,
         .announce_routes = &re_data->announce_routes,
     };
-
 
     route_run(&r_ctx_in, &r_ctx_out);
 
@@ -4754,64 +4746,6 @@ route_runtime_data_handler(struct engine_node *node, void *data)
         }
     }
 
-    return true;
-}
-
-static bool
-route_lb_data_handler(struct engine_node *node,
-                               void *data)
-{
-    struct ed_type_route *re_data = data;
-    struct ed_type_runtime_data *rt_data =
-        engine_get_input_data("runtime_data", node);
-    struct ed_type_lb_data *lb_data =
-        engine_get_input_data("lb_data", node);
-    const struct sbrec_load_balancer_table *lb_table =
-        EN_OVSDB_GET(engine_get_input("SB_load_balancer", node));
-
-    if (!lb_data->change_tracked) {
-        return false;
-    }
-
-    if (!rt_data->tracked) {
-        return false;
-    }
-
-    if (hmap_is_empty(&re_data->tracked_route_datapaths)) {
-        return true;
-    }
-
-    struct hmap *tracked_dp_bindings = &rt_data->tracked_dp_bindings;
-    if (hmap_is_empty(tracked_dp_bindings)) {
-        return true;
-    }
-
-    struct hmap *lbs = NULL;
-
-    struct tracked_datapath *t_dp;
-    HMAP_FOR_EACH (t_dp, node, tracked_dp_bindings) {
-        struct tracked_datapath *re_t_dp =
-            tracked_datapath_find(&re_data->tracked_route_datapaths, t_dp->dp);
-
-        if (!re_t_dp) {
-            continue;
-        }
-
-        if (!lbs) {
-            lbs = load_balancers_by_dp_init(&rt_data->local_datapaths,
-                                            lb_table);
-        }
-
-        struct load_balancers_by_dp *lbs_by_dp =
-            load_balancers_by_dp_find(lbs, re_t_dp->dp);
-        if (lbs_by_dp) {
-            /* Until we get I-P support for route exchange we need to
-             * request recompute. */
-            load_balancers_by_dp_cleanup(lbs);
-            return false;
-        }
-    }
-    load_balancers_by_dp_cleanup(lbs);
     return true;
 }
 
@@ -5206,10 +5140,6 @@ main(int argc, char *argv[])
     engine_add_input(&en_route, &en_sb_port_binding, NULL);
     engine_add_input(&en_route, &en_runtime_data,
                      route_runtime_data_handler);
-    engine_add_input(&en_route, &en_sb_load_balancer,
-                     engine_noop_handler);
-    engine_add_input(&en_route, &en_lb_data,
-                     route_lb_data_handler);
     engine_add_input(&en_route, &en_sb_route,
                      engine_noop_handler);
     engine_add_input(&en_route_exchange, &en_route, NULL);
