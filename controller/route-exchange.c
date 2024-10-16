@@ -246,7 +246,7 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
             if (error && error != EEXIST) {
                 VLOG_WARN_RL(&rl,
                              "Unable to create VRF %s for datapath "
-                             "%ld: %s.",
+                             "%"PRId64": %s.",
                              vrf_name, ad->key,
                              ovs_strerror(error));
                 goto out;
