@@ -4759,11 +4759,17 @@ route_sb_port_binding_data_handler(struct engine_node *node, void *data)
     const struct sbrec_port_binding *sbrec_pb;
     SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (sbrec_pb, pb_table) {
         struct tracked_datapath *re_t_dp =
-            tracked_datapath_find(&re_data->tracked_route_datapaths, sbrec_pb->datapath);
-
+            tracked_datapath_find(&re_data->tracked_route_datapaths,
+                                  sbrec_pb->datapath);
         if (re_t_dp) {
             /* Until we get I-P support for route exchange we need to request
              * recompute. */
+            return false;
+        }
+
+        if (route_exchange_relevant_port(sbrec_pb)) {
+            /* Until we get I-P support for route exchange we need to
+             * request recompute. */
             return false;
         }
 
