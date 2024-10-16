@@ -55,8 +55,7 @@ SYSTEM_DPDK_TESTSUITE_AT = \
 SYSTEM_KMOD_TESTSUITE_AT = \
 	tests/system-kmod-macros.at \
 	tests/system-kmod-testsuite.at \
-	tests/system-ovn-kmod.at \
-	tests/ovn-system-route-exchange.at
+	tests/system-ovn-kmod.at
 
 SYSTEM_USERSPACE_TESTSUITE_AT = \
 	tests/system-userspace-testsuite.at \
