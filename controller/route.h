@@ -59,6 +59,7 @@ struct advertise_route_entry {
     struct hmap_node node;
     struct in6_addr addr;
     unsigned int plen;
+    unsigned int priority;
     /* used by the route-exchange module to determine if the route is
      * already installed */
     bool installed;

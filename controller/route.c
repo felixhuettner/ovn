@@ -33,6 +33,9 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);
  * in the corresponding VRF interface name. */
 #define MAX_TABLE_ID 1000000000
 
+#define PRIORITY_DEFAULT 1000
+#define PRIORITY_LOCAL_BOUND 100
+
 bool
 route_exchange_relevant_port(const struct sbrec_port_binding *pb)
 {
@@ -64,6 +67,19 @@ find_local_crp(struct ovsdb_idl_index *sbrec_port_binding_by_name,
         return NULL;
     }
     return lport_lookup_by_name(sbrec_port_binding_by_name, crp);
+}
+
+static const struct sbrec_port_binding*
+find_local_crp_by_name(struct ovsdb_idl_index *sbrec_port_binding_by_name,
+               const struct sbrec_chassis *chassis,
+               const struct sset *active_tunnels,
+               const char *port_name)
+{
+    const struct sbrec_port_binding *pb = lport_lookup_by_name(
+        sbrec_port_binding_by_name, port_name);
+
+    return find_local_crp(sbrec_port_binding_by_name, chassis, active_tunnels,
+                          pb);
 }
 
 static void
@@ -162,11 +178,24 @@ route_run(struct route_ctx_in *r_ctx_in,
                 continue;
             }
 
+            unsigned int priority = PRIORITY_DEFAULT;
+
+            if (route->tracked_port) {
+                if (find_local_crp_by_name(
+                          r_ctx_in->sbrec_port_binding_by_name,
+                          r_ctx_in->chassis,
+                          r_ctx_in->active_tunnels,
+                          route->tracked_port)) {
+                    priority = PRIORITY_LOCAL_BOUND;
+                }
+            }
+
             struct advertise_route_entry *ar = xzalloc(sizeof(*ar));
             hmap_insert(&ad->routes, &ar->node,
                         advertise_route_hash(&prefix, plen));
             ar->addr = prefix;
             ar->plen = plen;
+            ar->priority = priority;
         }
         sbrec_route_index_destroy_row(route_filter);
 
