@@ -195,8 +195,8 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
             sset_add(&_maintained_vrfs, vrf_name);
         }
 
-        re_nl_sync_routes(ad->key, &ad->routes,
-                          &received_routes);
+        re_nl_sync_routes(ad->key,
+                          &ad->routes, &received_routes, ad->use_netns);
 
         sb_sync_learned_routes(ad->db, &received_routes,
                                &ad->bound_ports,
