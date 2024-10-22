@@ -18,6 +18,8 @@
 #include <stdbool.h>
 
 struct route_exchange_ctx_in {
+    struct ovsdb_idl_txn *ovnsb_idl_txn;
+    struct ovsdb_idl_index *sbrec_route_by_datapath;
     /* Contains struct advertise_datapath_entry */
     struct hmap *announce_routes;
 };
