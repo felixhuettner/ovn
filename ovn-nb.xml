@@ -3787,6 +3787,24 @@ or
           of the Logical Router appended to it.
           This vrf will contain all the routes that should be announced from
           this LRP.
+
+          It is mutually exclusive with
+          <ref column="options" key="use-netns"/>.
+      </column>
+
+      <column name="options" key="use-netns" type='{"type": "boolean"}'>
+        Only relevant if <ref column="options" key="dynamic-routing"
+        table="Logical_Router"/> on the respective Logical_Router is set
+          to <code>true</code>.
+
+          If this LRP is bound to a specific chassis then the ovn-controller of
+          this chassis will use a network namespace named "ovnns" with the
+          datapath id of the Logical Router appended to it instead of a vrf.
+          This netns will contain all the routes that should be announced from
+          this LRP in the default vrf.
+
+          It is mutually exclusive with
+          <ref column="options" key="maintain-vrf"/>.
       </column>
 
       <column name="options" key="dynamic-routing-ifname"

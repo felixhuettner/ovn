@@ -38,7 +38,6 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);
 #define TABLE_ID_VALID(table_id) (table_id != RT_TABLE_UNSPEC &&              \
                                   table_id != RT_TABLE_COMPAT &&              \
                                   table_id != RT_TABLE_DEFAULT &&             \
-                                  table_id != RT_TABLE_MAIN &&                \
                                   table_id != RT_TABLE_LOCAL &&               \
                                   table_id != RT_TABLE_MAX)
 
@@ -101,8 +100,8 @@ re_nl_delete_vrf(const char *ifname)
 }
 
 static int
-modify_route(uint32_t type, uint32_t flags_arg, uint32_t table_id,
-             const struct in6_addr *dst, unsigned int plen,
+modify_route(const char *netns, uint32_t type, uint32_t flags_arg,
+             uint32_t table_id, const struct in6_addr *dst, unsigned int plen,
              unsigned int priority)
 {
     uint32_t flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -137,15 +136,16 @@ modify_route(uint32_t type, uint32_t flags_arg, uint32_t table_id,
         nl_msg_put_in6_addr(&request, RTA_DST, dst);
     }
 
-    err = nl_transact(NETLINK_ROUTE, &request, NULL);
+    err = nl_ns_transact(netns, NETLINK_ROUTE, &request, NULL);
     ofpbuf_uninit(&request);
 
     return err;
 }
 
 int
-re_nl_add_route(uint32_t table_id, const struct in6_addr *dst,
-                unsigned int plen, unsigned int priority)
+re_nl_add_route(const char *netns, uint32_t table_id,
+                const struct in6_addr *dst, unsigned int plen,
+                unsigned int priority)
 {
     uint32_t flags = NLM_F_CREATE | NLM_F_EXCL;
     uint32_t type = RTM_NEWROUTE;
@@ -157,12 +157,13 @@ re_nl_add_route(uint32_t table_id, const struct in6_addr *dst,
         return EINVAL;
     }
 
-    return modify_route(type, flags, table_id, dst, plen, priority);
+    return modify_route(netns, type, flags, table_id, dst, plen, priority);
 }
 
 int
-re_nl_delete_route(uint32_t table_id, const struct in6_addr *dst,
-                   unsigned int plen, unsigned int priority)
+re_nl_delete_route(const char * netns, uint32_t table_id,
+                   const struct in6_addr *dst, unsigned int plen,
+                   unsigned int priority)
 {
     if (!TABLE_ID_VALID(table_id)) {
         VLOG_WARN_RL(&rl,
@@ -171,7 +172,7 @@ re_nl_delete_route(uint32_t table_id, const struct in6_addr *dst,
         return EINVAL;
     }
 
-    return modify_route(RTM_DELROUTE, 0, table_id, dst, plen, priority);
+    return modify_route(netns, RTM_DELROUTE, 0, table_id, dst, plen, priority);
 }
 
 static uint32_t
@@ -195,6 +196,7 @@ re_nl_received_routes_destroy(struct hmap *host_routes)
 struct route_msg_handle_data {
     const struct hmap *routes;
     struct hmap *learned_routes;
+    const char *netns;
 };
 
 static void
@@ -239,7 +241,8 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
         }
     }
 
-    err = re_nl_delete_route(rd->rta_table_id, &rd->rta_dst,
+    err = re_nl_delete_route(handle_data->netns,
+                             rd->rta_table_id, &rd->rta_dst,
                              rd->rtm_dst_len, rd->rta_priority);
     if (err) {
         char addr_s[INET6_ADDRSTRLEN + 1];
@@ -254,8 +257,16 @@ handle_route_msg_delete_routes(const struct route_table_msg *msg, void *data)
 
 void
 re_nl_sync_routes(uint32_t table_id,
-                  const struct hmap *routes, struct hmap *learned_routes)
+                  const struct hmap *routes, struct hmap *learned_routes,
+                  bool use_netns)
 {
+
+    char * netns = NULL;
+    if (use_netns) {
+        netns = ovnns_get_name(table_id);
+        table_id = RT_TABLE_MAIN;
+    }
+
     struct advertise_route_entry *ar;
     HMAP_FOR_EACH (ar, node, routes) {
         ar->installed = false;
@@ -267,8 +278,9 @@ re_nl_sync_routes(uint32_t table_id,
     struct route_msg_handle_data data = {
         .routes = routes,
         .learned_routes = learned_routes,
+        .netns = netns,
     };
-    route_table_dump_one_table(table_id, handle_route_msg_delete_routes,
+    route_table_ns_dump_one_table(netns, table_id, handle_route_msg_delete_routes,
                                &data);
 
     /* Add any remaining routes in the host_routes hmap to the system routing
@@ -277,8 +289,8 @@ re_nl_sync_routes(uint32_t table_id,
         if (ar->installed) {
             continue;
         }
-        int err = re_nl_add_route(table_id, &ar->addr, ar->plen,
-                                  ar->priority);
+        int err = re_nl_add_route(netns, table_id, &ar->addr,
+                                  ar->plen, ar->priority);
         if (err) {
             char addr_s[INET6_ADDRSTRLEN + 1];
             VLOG_WARN_RL(&rl, "Add route table_id=%"PRIu32" dst=%s "
@@ -290,13 +302,15 @@ re_nl_sync_routes(uint32_t table_id,
                          ovs_strerror(err));
         }
     }
+    free(netns);
 }
 
 static void
 handle_route_msg_delete_all_our_routes(const struct route_table_msg *msg,
-                                       void *data OVS_UNUSED)
+                                       void *data)
 {
     const struct route_data *rd = &msg->rd;
+    struct route_msg_handle_data *handle_data = data;
     int err;
 
     /* This route is not from us, so not interesting. */
@@ -304,8 +318,8 @@ handle_route_msg_delete_all_our_routes(const struct route_table_msg *msg,
         return;
     }
 
-    err = re_nl_delete_route(rd->rta_table_id, &rd->rta_dst,
-                             rd->rtm_dst_len, rd->rta_priority);
+    err = re_nl_delete_route(handle_data->netns, rd->rta_table_id,
+                             &rd->rta_dst, rd->rtm_dst_len, rd->rta_priority);
     if (err) {
         char addr_s[INET6_ADDRSTRLEN + 1];
         VLOG_WARN_RL(&rl, "Delete route table_id=%"PRIu32" dst=%s plen=%d: %s",
@@ -318,16 +332,23 @@ handle_route_msg_delete_all_our_routes(const struct route_table_msg *msg,
 }
 
 void
-re_nl_cleanup_routes(uint32_t table_id)
+re_nl_cleanup_routes(uint32_t table_id, bool use_netns)
 {
+    char * netns = NULL;
+    if (use_netns) {
+        netns = ovnns_get_name(table_id);
+        table_id = RT_TABLE_MAIN;
+    }
+
     /* Remove routes from the system that are not in the host_routes hmap and
      * remove entries from host_routes hmap that match routes already installed
      * in the system. */
     struct route_msg_handle_data data = {
         .routes = NULL,
         .learned_routes = NULL,
+        .netns = netns,
     };
-    route_table_dump_one_table(table_id,
+    route_table_ns_dump_one_table(netns, table_id,
                                handle_route_msg_delete_all_our_routes,
                                &data);
 }

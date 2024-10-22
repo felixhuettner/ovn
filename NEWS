@@ -34,6 +34,8 @@ Post v24.09.0
      This will prevent such setups from forwarding traffic between ovn chassis
      just based on ecmp routes and the datapath hash if the route is locally
      available.
+   - Now also support announcing/learning routes in network namespaces. To use
+     this set "use-netns" on the LRP.
 
 OVN v24.09.0 - 13 Sep 2024
 --------------------------

@@ -22,12 +22,13 @@
 struct route_table_watch_request {
     struct hmap_node node;
     uint32_t table_id;
+    bool use_netns;
 };
 
 static inline uint32_t
-route_table_notify_hash_watch(uint32_t table_id)
+route_table_notify_hash_watch(bool use_netns, uint32_t table_id)
 {
-    return hash_add(0, table_id);
+    return hash_add(hash_boolean(use_netns, 0), table_id);
 }
 
 /* returns true if any route table has changed enough that we need to learn

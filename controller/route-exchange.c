@@ -37,6 +37,7 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);
 struct maintained_route_table_entry {
     struct hmap_node node;
     uint32_t table_id;
+    bool use_netns;
 };
 
 static struct hmap _maintained_route_tables = HMAP_INITIALIZER(
@@ -56,19 +57,20 @@ struct route_entry {
 };
 
 static uint32_t
-maintained_route_table_hash(uint32_t table_id)
+maintained_route_table_hash(uint32_t table_id, bool use_netns)
 {
-    return hash_int(table_id, 0);
+    uint32_t hash = hash_int(table_id, 0);
+    return hash_boolean(use_netns, hash);
 }
 
 static bool
-maintained_route_table_contains(uint32_t table_id)
+maintained_route_table_contains(uint32_t table_id, bool use_netns)
 {
-    uint32_t hash = maintained_route_table_hash(table_id);
+    uint32_t hash = maintained_route_table_hash(table_id, use_netns);
     struct maintained_route_table_entry *mrt;
     HMAP_FOR_EACH_WITH_HASH (mrt, node, hash,
                              &_maintained_route_tables) {
-        if (mrt->table_id == table_id) {
+        if (mrt->table_id == table_id && mrt->use_netns == use_netns) {
             return true;
         }
     }
@@ -76,14 +78,15 @@ maintained_route_table_contains(uint32_t table_id)
 }
 
 static void
-maintained_route_table_add(uint32_t table_id)
+maintained_route_table_add(uint32_t table_id, bool use_netns)
 {
-    if (maintained_route_table_contains(table_id)) {
+    if (maintained_route_table_contains(table_id, use_netns)) {
         return;
     }
-    uint32_t hash = maintained_route_table_hash(table_id);
+    uint32_t hash = maintained_route_table_hash(table_id, use_netns);
     struct maintained_route_table_entry *mrt = xzalloc(sizeof(*mrt));
     mrt->table_id = table_id;
+    mrt->use_netns = use_netns;
     hmap_insert(&_maintained_route_tables, &mrt->node, hash);
 }
 
@@ -262,9 +265,9 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
             sset_find_and_delete(&old_maintained_vrfs, vrf_name);
         }
 
-        maintained_route_table_add(ad->key);
+        maintained_route_table_add(ad->key, ad->use_netns);
         re_nl_sync_routes(ad->key, &ad->routes,
-                          &received_routes);
+                          &received_routes, ad->use_netns);
 
         sb_sync_learned_routes(ad->db, &received_routes,
                                &ad->bound_ports,
@@ -275,8 +278,9 @@ route_exchange_run(struct route_exchange_ctx_in *r_ctx_in,
 
         struct route_table_watch_request *wr = xzalloc(sizeof(*wr));
         wr->table_id = ad->key;
+        wr->use_netns = ad->use_netns;
         hmap_insert(&r_ctx_out->route_table_watches, &wr->node,
-                    route_table_notify_hash_watch(wr->table_id));
+                    route_table_notify_hash_watch(wr->use_netns, wr->table_id));
 
 out:
         re_nl_received_routes_destroy(&received_routes);
@@ -285,8 +289,8 @@ out:
     /* Remove routes in tables previousl maintained by us. */
     struct maintained_route_table_entry *mrt;
     HMAP_FOR_EACH_SAFE (mrt, node, &old_maintained_route_table) {
-        if (!maintained_route_table_contains(mrt->table_id)) {
-            re_nl_cleanup_routes(mrt->table_id);
+        if (!maintained_route_table_contains(mrt->table_id, mrt->use_netns)) {
+            re_nl_cleanup_routes(mrt->table_id, mrt->use_netns);
         }
         hmap_remove(&old_maintained_route_table, &mrt->node);
         free(mrt);
@@ -309,7 +313,7 @@ route_exchange_cleanup(void)
 {
     struct maintained_route_table_entry *mrt;
     HMAP_FOR_EACH_SAFE (mrt, node, &_maintained_route_tables) {
-        re_nl_cleanup_routes(mrt->table_id);
+        re_nl_cleanup_routes(mrt->table_id, mrt->use_netns);
     }
 
     const char *vrf_name;

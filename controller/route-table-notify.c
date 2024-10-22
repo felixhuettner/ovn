@@ -32,7 +32,7 @@ VLOG_DEFINE_THIS_MODULE(route_table_notify);
 struct route_table_watch_entry {
     struct hmap_node node;
     uint32_t table_id;
-    bool is_netns;
+    bool use_netns;
     struct nln *nln;
     struct nln_notifier *route_notifier;
     struct nln_notifier *route6_notifier;
@@ -45,12 +45,12 @@ static bool any_route_table_changed = false;
 static struct route_table_msg rtmsg;
 
 static struct route_table_watch_entry*
-find_watch_entry(uint32_t table_id)
+find_watch_entry(bool use_netns, uint32_t table_id)
 {
     struct route_table_watch_entry *we;
-    uint32_t hash = route_table_notify_hash_watch(table_id);
+    uint32_t hash = route_table_notify_hash_watch(use_netns, table_id);
     HMAP_FOR_EACH_WITH_HASH (we, node, hash, &watches) {
-        if (table_id == we->table_id) {
+        if (table_id == we->table_id && use_netns == we->use_netns) {
             return we;
         }
     }
@@ -67,16 +67,18 @@ route_table_change(const struct route_table_msg *change OVS_UNUSED,
 }
 
 static void
-add_watch_entry(uint32_t table_id)
+add_watch_entry(bool use_netns, uint32_t table_id)
 {
     struct route_table_watch_entry *we;
-    uint32_t hash = route_table_notify_hash_watch(table_id);
+    uint32_t hash = route_table_notify_hash_watch(use_netns, table_id);
     we = xzalloc(sizeof(*we));
     we->table_id = table_id;
+    we->use_netns = use_netns;
     we->stale = false;
     VLOG_DBG("registering new route table watcher for table %d",
              table_id);
-    we->nln = nln_create( NETLINK_ROUTE, route_table_parse, &rtmsg);
+    char* netns = we->use_netns ? ovnns_get_name(table_id) : NULL;
+    we->nln = nln_ns_create(netns, NETLINK_ROUTE, route_table_parse, &rtmsg);
 
     we->route_notifier =
         nln_notifier_create(we->nln, RTNLGRP_IPV4_ROUTE,
@@ -129,11 +131,11 @@ route_table_notify_update_watches(struct hmap *route_table_watches)
 
     struct route_table_watch_request *wr;
     HMAP_FOR_EACH_SAFE (wr, node, route_table_watches) {
-        we = find_watch_entry(wr->table_id);
+        we = find_watch_entry(wr->use_netns, wr->table_id);
         if (we) {
             we->stale = false;
         } else {
-            add_watch_entry(wr->table_id);
+            add_watch_entry(wr->use_netns, wr->table_id);
         }
         hmap_remove(route_table_watches, &wr->node);
         free(wr);
