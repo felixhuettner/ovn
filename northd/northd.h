@@ -670,9 +670,11 @@ struct ovn_port {
     bool is_active_active;
     char *aa_chassis_name;
     size_t aa_chassis_index;
-    /* The following value is only set on the lrp side of an
+    /* The following two values are only set on the lrp side of an
      * active-active port binding */
     char *aa_mac;
+    /* This is 0 if not set by the user */
+    uint32_t aa_ifindex;
 
     /* Reference of lflows generated for this ovn_port.
      *
