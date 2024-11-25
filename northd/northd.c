@@ -1261,6 +1261,7 @@ ovn_port_cleanup(struct ovn_port *port)
         ovs_assert(port->aa_chassis_name);
         free(port->aa_mac);
         free(port->aa_chassis_name);
+        free(port->aa_ifname);
     }
 
     destroy_lport_addresses(&port->lrp_networks);
@@ -2630,6 +2631,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
                 lsp->aa_chassis_name = xstrdup(chassis->name);
                 lrp->aa_chassis_index = j;
                 lsp->aa_chassis_index = j;
+                lrp->aa_ifname = networks.ifnames[j];
 
                 if (nbsp_rpr) {
                     char *lsp_rpr_name = xasprintf("%s-%s-%"PRIuSIZE,
@@ -2645,6 +2647,7 @@ join_logical_ports(const struct sbrec_port_binding_table *sbrec_pb_table,
             }
             free(networks.network_name);
             free(networks.addresses);
+            free(networks.ifnames);
         }
     }
 
@@ -4333,8 +4336,13 @@ sync_pb_for_lrp(struct ovn_port *op,
         if (smap_get_bool(&op->od->nbr->options, "dynamic-routing", false)) {
             smap_add(&new, "dynamic-routing", "true");
         }
-        const char *ifname = smap_get(&op->nbrp->options,
-                                      "dynamic-routing-ifname");
+        const char *ifname = op->aa_ifname;
+        if (!ifname && op->primary_port) {
+            ifname = op->primary_port->aa_ifname;
+        }
+        if (!ifname) {
+            ifname = smap_get(&op->nbrp->options, "dynamic-routing-ifname");
+        }
         if (ifname) {
             smap_add(&new, "dynamic-routing-ifname", ifname);
         }

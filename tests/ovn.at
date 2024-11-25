@@ -39850,7 +39850,7 @@ as hv1 ovs-appctl fdb/add br-phys patch-br-phys-to-br-phys2 0 00:cc:cc:cc:cc:11
 
 # active-active mappings
 
-as hv1 ovs-vsctl set open . external_ids:ovn-active-active-mappings="phys;00:01:01:00:00:01,192.168.10.10/24;00:01:02:00:00:01,192.168.11.10/24"
+as hv1 ovs-vsctl set open . external_ids:ovn-active-active-mappings="phys;00:01:01:00:00:01,192.168.10.10/24,interface1;00:01:02:00:00:01,192.168.11.10/24,interface2"
 as hv2 ovs-vsctl set open . external_ids:ovn-active-active-mappings="phys;00:02:01:00:00:01,192.168.20.10/24"
 
 # LS setup
@@ -40092,6 +40092,14 @@ outside_to_bgp() {
 outside_to_bgp 1 br-phys_hv1-1 0 00:01:01:00:00:01 192.168.10.10
 outside_to_bgp 1 br-phys2_hv1-2 1 00:01:02:00:00:01 192.168.11.10
 outside_to_bgp 2 br-phys_hv2-1 0 00:02:01:00:00:01 192.168.20.10
+
+# the LRPs of hv1 should both have an dynamic-routing-ifname set
+AT_CHECK([ovn-sbctl --bare --columns=options list Port_Binding cr-internet-phys-hv1-0], [0], [dnl
+always-redirect=true distributed-port=internet-phys-hv1-0 dynamic-routing-ifname=interface1
+])
+AT_CHECK([ovn-sbctl --bare --columns=options list Port_Binding cr-internet-phys-hv1-1], [0], [dnl
+always-redirect=true distributed-port=internet-phys-hv1-1 dynamic-routing-ifname=interface2
+])
 
 OVN_CLEANUP([hv1],[hv2
 /Couldn't parse MAC binding/d])

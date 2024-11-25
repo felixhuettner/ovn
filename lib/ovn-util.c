@@ -1109,7 +1109,8 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
     /* Structure
      * ovn-active-active-mappings="<network>|<network>"
      * network="<network_name>;<port>;<port>"
-     * port="<mac>,<ip>" */
+     * port="<mac>,<ip>,<ifname>"
+     * name is optional */
     nextnet = start = xstrdup(aa_ports);
     while ((curnet = strsep(&nextnet, "|")) && *curnet) {
         nextport = curnet;
@@ -1121,10 +1122,11 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
         chassis_aa_network->network_name = xstrdup(network);
         chassis_aa_network->n_addresses = 0;
         while ((curport = strsep(&nextport, ";")) && *curport) {
-            char *mac, *ip;
+            char *mac, *ip, *ifname;
 
             mac = strsep(&curport, ",");
-            ip = curport;
+            ip = strsep(&curport, ",");
+            ifname = curport;
 
             if (!mac || !ip || !*mac || !*ip) {
                 VLOG_ERR("Invalid format for "
@@ -1183,6 +1185,14 @@ chassis_find_active_active_networks(const struct sbrec_chassis *chassis,
                     continue;
                 }
             }
+
+            chassis_aa_network->ifnames = xrealloc(
+                chassis_aa_network->ifnames,
+                (chassis_aa_network->n_addresses + 1
+                 ) * sizeof *chassis_aa_network->ifnames);
+            chassis_aa_network->ifnames[
+                chassis_aa_network->n_addresses] = nullable_xstrdup(ifname);
+
             chassis_aa_network->n_addresses++;
         }
     }
