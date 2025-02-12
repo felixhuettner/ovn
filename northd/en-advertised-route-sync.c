@@ -351,9 +351,6 @@ advertised_route_table_sync(
         if (route->is_discard_route) {
             continue;
         }
-        if (prefix_is_link_local(&route->prefix, route->plen)) {
-            continue;
-        }
         if (!route->od->dynamic_routing) {
             continue;
         }
@@ -376,6 +373,12 @@ advertised_route_table_sync(
                 continue;
             }
         }
+
+        /* We only traverse link local prefixes when publishing host routes. */
+        if (prefix_is_link_local(&route->prefix, route->plen)) {
+            continue;
+        }
+
         if (route->source == ROUTE_SOURCE_STATIC &&
                 !drr_mode_STATIC_is_set(drr)) {
             continue;

@@ -15301,6 +15301,46 @@ AT_CLEANUP
 ])
 
 OVN_FOR_EACH_NORTHD_NO_HV([
+AT_SETUP([dynamic-routing - host routes via link-local])
+AT_KEYWORDS([dynamic-routing])
+ovn_start
+
+# We start with announcing routes on a lr with 1 lrps.
+# The LRP has no ip set, so just a defualt link-local one will be generated.
+# LRP lr0-sw0 is connected to ls sw0.
+check ovn-nbctl lr-add lr0
+check ovn-nbctl set Logical_Router lr0 option:dynamic-routing=true \
+    option:dynamic-routing-redistribute="connected-as-host,static"
+check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01
+sw0=$(fetch_column port_binding _uuid logical_port=lr0-sw0)
+check ovn-nbctl ls-add sw0
+check ovn-nbctl lsp-add sw0 sw0-lr0
+check ovn-nbctl --wait=sb set Logical_Switch_Port sw0-lr0 \
+    type=router options:router-port=lr0-sw0
+datapath=$(fetch_column datapath_binding _uuid external_ids:name=lr0)
+check_row_count Advertised_Route 0
+
+# Adding a LR lr1 to the LS sw0 will not advertise the LRP of the new router
+# as it also just has a link local address
+check ovn-nbctl lr-add lr1
+check ovn-nbctl lrp-add lr1 lr1-sw0 00:00:00:01:ff:01
+check ovn-nbctl lsp-add sw0 sw0-lr1
+lr1=$(fetch_column port_binding _uuid logical_port=lr1-sw0)
+check ovn-nbctl --wait=sb set Logical_Switch_Port sw0-lr1 \
+    type=router options:router-port=lr1-sw0
+check_row_count Advertised_Route 0
+
+# Adding a NAT rule to lr1 will start advertising it
+check ovn-nbctl lr-nat-add lr1 dnat_and_snat 192.168.0.10 10.0.0.10
+check ovn-nbctl --wait=sb set NAT . options:add_route=true
+check_row_count Advertised_Route 1
+check_column $lr1 Advertised_Route tracked_port \
+    datapath=$datapath logical_port=$sw0 ip_prefix=192.168.0.10/32
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD_NO_HV([
 AT_SETUP([dynamic-routing - lrp options])
 AT_KEYWORDS([dynamic-routing])
 ovn_start
