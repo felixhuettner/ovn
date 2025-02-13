@@ -175,15 +175,21 @@ void
     return data;
 }
 
+static void
+en_dynamic_routes_clean(struct dynamic_routes_data *data)
+{
+    struct parsed_route *r;
+    HMAP_FOR_EACH_POP (r, key_node, &data->parsed_routes) {
+        parsed_route_free(r);
+    }
+}
+
 void
 en_dynamic_routes_cleanup(void *data_)
 {
     struct dynamic_routes_data *data = data_;
 
-    struct parsed_route *r;
-    HMAP_FOR_EACH_POP (r, key_node, &data->parsed_routes) {
-        parsed_route_free(r);
-    }
+    en_dynamic_routes_clean(data);
     hmap_destroy(&data->parsed_routes);
 }
 
@@ -195,6 +201,7 @@ en_dynamic_routes_run(struct engine_node *node, void *data)
     struct ed_type_lr_stateful *lr_stateful_data =
         engine_get_input_data("lr_stateful", node);
 
+    en_dynamic_routes_clean(data);
     const struct lr_stateful_record *lr_stateful_rec;
     HMAP_FOR_EACH (lr_stateful_rec, key_node,
                    &lr_stateful_data->table.entries) {
