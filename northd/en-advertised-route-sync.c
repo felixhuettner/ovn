@@ -670,6 +670,9 @@ should_advertise_route(const struct uuidset *host_route_lrps,
         return true;
     case ROUTE_SOURCE_STATIC:
         return drr_mode_STATIC_is_set(drr);
+    case ROUTE_SOURCE_IC_CONNECTED:
+    case ROUTE_SOURCE_IC_STATIC:
+        return drr_mode_IC_is_set(drr);
     case ROUTE_SOURCE_NAT:
         return drr_mode_NAT_is_set(drr);
     case ROUTE_SOURCE_LB:
@@ -712,6 +715,8 @@ process_prereqs_advertise_route(
         }
         break;
     case ROUTE_SOURCE_STATIC:
+    case ROUTE_SOURCE_IC_CONNECTED:
+    case ROUTE_SOURCE_IC_STATIC:
         break;
     case ROUTE_SOURCE_NAT:
         /* If NAT route tracks port on a different DP than the one that

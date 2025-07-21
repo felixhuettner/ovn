@@ -341,10 +341,11 @@ static const char *reg_ct_state[] = {
  *  3. routes learned from the outside via ovn-controller (e.g. bgp)
  * (src-ip routes have lower priority than all other routes regardless of
  * prefix length, so not included here.) */
-#define ROUTE_PRIO_OFFSET_MULTIPLIER 6
+#define ROUTE_PRIO_OFFSET_MULTIPLIER 8
 #define ROUTE_PRIO_OFFSET_LEARNED 0
 #define ROUTE_PRIO_OFFSET_STATIC 2
 #define ROUTE_PRIO_OFFSET_CONNECTED 4
+#define ROUTE_PRIO_OFFSET_IC 6
 
 /* Returns the type of the datapath to which a flow with the given 'stage' may
  * be added. */
@@ -867,6 +868,10 @@ parse_dynamic_routing_redistribute(
         }
         if (!strcmp(token, "lb")) {
             out |= DRRM_LB;
+            continue;
+        }
+        if (!strcmp(token, "ic")) {
+            out |= DRRM_IC;
             continue;
         }
         static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 1);
@@ -11713,12 +11718,14 @@ parsed_routes_add_static(const struct ovn_datapath *od,
                                          "ecmp_symmetric_reply",
                                          false);
 
-    enum route_source source;
-    if (!strcmp(smap_get_def(&route->options, "origin", ""),
-                ROUTE_ORIGIN_CONNECTED)) {
-        source = ROUTE_SOURCE_CONNECTED;
-    } else {
-        source = ROUTE_SOURCE_STATIC;
+    enum route_source source = ROUTE_SOURCE_STATIC;
+    const char *origin = smap_get(&route->options, "origin");
+    if (origin) {
+      if (!strcmp(origin, ROUTE_ORIGIN_CONNECTED)) {
+          source = ROUTE_SOURCE_IC_CONNECTED;
+      } else {
+          source = ROUTE_SOURCE_IC_STATIC;
+      }
     }
 
     parsed_route_add(od, nexthop, &prefix, plen, is_discard_route, lrp_addr_s,
@@ -11816,6 +11823,9 @@ route_source_to_offset(enum route_source source)
         return ROUTE_PRIO_OFFSET_CONNECTED;
     case ROUTE_SOURCE_STATIC:
         return ROUTE_PRIO_OFFSET_STATIC;
+    case ROUTE_SOURCE_IC_CONNECTED:
+    case ROUTE_SOURCE_IC_STATIC:
+        return ROUTE_PRIO_OFFSET_IC;
     case ROUTE_SOURCE_LEARNED:
         return ROUTE_PRIO_OFFSET_LEARNED;
     case ROUTE_SOURCE_NAT:
@@ -11851,7 +11861,9 @@ build_route_match(const struct ovn_port *op_inport, uint32_t rtb_id,
         ds_put_format(match, "inport == %s && ", op_inport->json_key);
     }
     if (rtb_id || source == ROUTE_SOURCE_STATIC ||
-            source == ROUTE_SOURCE_LEARNED) {
+            source == ROUTE_SOURCE_LEARNED ||
+            source == ROUTE_SOURCE_IC_CONNECTED ||
+            source == ROUTE_SOURCE_IC_STATIC) {
         ds_put_format(match, "%s == %d && ", REG_ROUTE_TABLE_ID, rtb_id);
     }
 
